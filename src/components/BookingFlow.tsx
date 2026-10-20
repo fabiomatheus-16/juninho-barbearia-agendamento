@@ -557,43 +557,103 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
 
           {/* Time Slots Grid */}
           {isOpenDate(selectedDate) && (
-            <div>
-              <span className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-                Horários Disponíveis (Intervalo de almoço: 12h–14h)
-              </span>
-
-              <div className="grid grid-cols-4 gap-2">
-                {TIME_SLOTS.map((timeSlot) => {
-                  const isTaken = taken.has(timeSlot);
-                  const isSelected = selectedTime === timeSlot;
-                  const isValidHour = isWithinOpeningHours(
-                    selectedDate,
-                    timeSlot,
-                    selectedService?.duration || 30
-                  );
-
-                  const disabled = isTaken || !isValidHour;
-
-                  return (
-                    <button
-                      key={timeSlot}
-                      disabled={disabled}
-                      onClick={() => setSelectedTime(timeSlot)}
-                      className={`h-11 rounded-xl text-xs font-bold font-mono transition relative ${
-                        isSelected
-                          ? "bg-[#00f0ff] text-[#090a0f] shadow-[0_0_15px_rgba(0,240,255,0.4)] scale-105"
-                          : disabled
-                          ? "bg-[#14151a] text-gray-600 border border-[#1e2129] cursor-not-allowed line-through"
-                          : "bg-[#1c202a] text-gray-300 border border-[#2b303e] hover:border-[#00f0ff] hover:text-white"
-                      }`}
-                    >
-                      {timeSlot}
-                    </button>
-                  );
-                })}
+            <div className="space-y-4">
+              <div>
+                <span className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+                  Horários Disponíveis (Intervalos de 1h • Almoço: 12h–14h)
+                </span>
+                <p className="text-[11px] text-gray-500">
+                  Toque no horário desejado para prosseguir com seu agendamento:
+                </p>
               </div>
 
-              <div className="flex items-center justify-center gap-4 mt-3 text-[11px] text-gray-400">
+              {/* Turno da Manhã */}
+              <div className="p-3.5 rounded-2xl bg-[#14161f] border border-[#232734]">
+                <div className="flex items-center justify-between mb-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="size-2 rounded-full bg-[#00f0ff]" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-gray-300">
+                      Manhã (08h às 12h)
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-gray-500 font-mono">4 opções</span>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2">
+                  {TIME_SLOTS.filter((t) => t < "12:00").map((timeSlot) => {
+                    const isTaken = taken.has(timeSlot);
+                    const isSelected = selectedTime === timeSlot;
+                    const isValidHour = isWithinOpeningHours(
+                      selectedDate,
+                      timeSlot,
+                      selectedService?.duration || 30
+                    );
+                    const disabled = isTaken || !isValidHour;
+
+                    return (
+                      <button
+                        key={timeSlot}
+                        disabled={disabled}
+                        onClick={() => setSelectedTime(timeSlot)}
+                        className={`h-11 rounded-xl text-xs font-bold font-mono transition relative ${
+                          isSelected
+                            ? "bg-[#00f0ff] text-[#090a0f] shadow-[0_0_15px_rgba(0,240,255,0.4)] scale-105"
+                            : disabled
+                            ? "bg-[#14151a] text-gray-600 border border-[#1e2129] cursor-not-allowed line-through"
+                            : "bg-[#1c202a] text-gray-300 border border-[#2b303e] hover:border-[#00f0ff] hover:text-white"
+                        }`}
+                      >
+                        {timeSlot}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Turno da Tarde & Noite */}
+              <div className="p-3.5 rounded-2xl bg-[#14161f] border border-[#232734]">
+                <div className="flex items-center justify-between mb-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="size-2 rounded-full bg-[#0099ff]" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-gray-300">
+                      Tarde & Noite (14h às 19h)
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-gray-500 font-mono">5 opções (inclui 18h)</span>
+                </div>
+
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                  {TIME_SLOTS.filter((t) => t >= "12:00").map((timeSlot) => {
+                    const isTaken = taken.has(timeSlot);
+                    const isSelected = selectedTime === timeSlot;
+                    const isValidHour = isWithinOpeningHours(
+                      selectedDate,
+                      timeSlot,
+                      selectedService?.duration || 30
+                    );
+                    const disabled = isTaken || !isValidHour;
+
+                    return (
+                      <button
+                        key={timeSlot}
+                        disabled={disabled}
+                        onClick={() => setSelectedTime(timeSlot)}
+                        className={`h-11 rounded-xl text-xs font-bold font-mono transition relative ${
+                          isSelected
+                            ? "bg-[#00f0ff] text-[#090a0f] shadow-[0_0_15px_rgba(0,240,255,0.4)] scale-105"
+                            : disabled
+                            ? "bg-[#14151a] text-gray-600 border border-[#1e2129] cursor-not-allowed line-through"
+                            : "bg-[#1c202a] text-gray-300 border border-[#2b303e] hover:border-[#00f0ff] hover:text-white"
+                        }`}
+                      >
+                        {timeSlot}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center gap-4 mt-2 text-[11px] text-gray-400">
                 <span className="flex items-center gap-1.5">
                   <span className="size-2 rounded-full bg-[#00f0ff]" />
                   Disponível

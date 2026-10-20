@@ -19,7 +19,7 @@ export const SHOP: ShopInfo = {
   phoneDisplay: "(84) 99457-1579",
   address: "Rua Principal, Centro",
   founded: 2021,
-  hours: "Segunda a Sábado · 08h–12h e 14h–18h",
+  hours: "Segunda a Sábado · 08h–12h e 14h–19h",
   lunchBreak: "12h às 14h (Almoço)",
   tenantId: DEFAULT_TENANT_ID,
 };
@@ -112,15 +112,13 @@ export const getRelativeDateISO = (offsetDays: number) => {
 
 export const TIME_SLOTS: string[] = (() => {
   const slots: string[] = [];
-  // Turno da Manhã: 08:00 - 11:30
+  // Turno da Manhã: 08:00, 09:00, 10:00, 11:00 (intervalos de 1 hora)
   for (let h = 8; h < 12; h++) {
     slots.push(`${String(h).padStart(2, "0")}:00`);
-    slots.push(`${String(h).padStart(2, "0")}:30`);
   }
-  // Turno da Tarde: 14:00 - 17:30
-  for (let h = 14; h < 18; h++) {
+  // Turno da Tarde e Noite: 14:00, 15:00, 16:00, 17:00, 18:00 (intervalos de 1 hora)
+  for (let h = 14; h <= 18; h++) {
     slots.push(`${String(h).padStart(2, "0")}:00`);
-    slots.push(`${String(h).padStart(2, "0")}:30`);
   }
   return slots;
 })();
@@ -139,12 +137,11 @@ export function isWithinOpeningHours(dateStr: string, timeStr: string, durationM
   const [h, m] = timeStr.split(":").map(Number);
   if (isNaN(h) || isNaN(m)) return false;
   const start = h * 60 + m;
-  const end = start + durationMin;
 
-  // Turno da Manhã: 08:00 (480) até 12:00 (720)
-  const isMorning = start >= 480 && end <= 720;
-  // Turno da Tarde: 14:00 (840) até 18:00 (1080)
-  const isAfternoon = start >= 840 && end <= 1080;
+  // Turno da Manhã: 08:00 (480) até 11:00 (660)
+  const isMorning = start >= 480 && start <= 660;
+  // Turno da Tarde & Noite: 14:00 (840) até 18:00 (1080)
+  const isAfternoon = start >= 840 && start <= 1080;
 
   return isMorning || isAfternoon;
 }

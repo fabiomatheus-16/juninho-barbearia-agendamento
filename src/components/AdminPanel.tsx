@@ -762,7 +762,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
                   <div className="flex items-center gap-2">
                     <span className="size-2 rounded-full bg-[#0099ff]" />
                     <h3 className="text-sm font-bold uppercase tracking-wider text-white">
-                      Turno da Tarde (14h às 18h)
+                      Turno da Tarde & Noite (14h às 19h)
                     </h3>
                   </div>
                   <span className="text-xs text-gray-400">
