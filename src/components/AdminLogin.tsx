@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Lock, Mail, KeyRound, ArrowRight, ShieldCheck, ArrowLeft, Eye, EyeOff, Sparkles } from "lucide-react";
+import { Lock, Mail, KeyRound, ArrowRight, ShieldCheck, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { actions, useStore } from "../lib/store";
 import { BrandLogo } from "./ui/BrandLogo";
 
@@ -43,18 +43,6 @@ export function AdminLogin({ onSuccess, onBackToHome }: AdminLoginProps) {
         );
       }
     }, 400);
-  };
-
-  const fillQuickDemo = (type: "credentials" | "pin") => {
-    if (type === "credentials") {
-      setMode("credentials");
-      setEmail(adminCredentials.email);
-      setPassword(adminCredentials.password);
-    } else {
-      setMode("pin");
-      setPin(adminCredentials.pin);
-    }
-    setError(null);
   };
 
   return (
@@ -202,9 +190,6 @@ export function AdminLogin({ onSuccess, onBackToHome }: AdminLoginProps) {
                     className="w-full h-14 rounded-xl bg-[#14161c] border border-[#272a34] text-center tracking-[0.5em] text-2xl font-bold text-[#00f0ff] focus:outline-none focus:border-[#00f0ff] focus:ring-1 focus:ring-[#00f0ff] transition"
                   />
                 </div>
-                <p className="text-[11px] text-gray-500 text-center mt-2">
-                  PIN padrão de fábrica: <strong className="text-gray-300">1234</strong>
-                </p>
               </div>
             )}
 
@@ -223,30 +208,6 @@ export function AdminLogin({ onSuccess, onBackToHome }: AdminLoginProps) {
               )}
             </button>
           </form>
-
-          {/* Quick Demo Fill Helper */}
-          <div className="mt-6 pt-5 border-t border-[#272a34]/80 text-center">
-            <p className="text-[11px] text-gray-400 mb-2 flex items-center justify-center gap-1">
-              <Sparkles className="size-3 text-[#00f0ff]" />
-              Acesso rápido para testes:
-            </p>
-            <div className="flex flex-wrap gap-2 justify-center">
-              <button
-                type="button"
-                onClick={() => fillQuickDemo("credentials")}
-                className="px-2.5 py-1 text-xs rounded-lg bg-[#14161c] hover:bg-[#1f222d] border border-[#272a34] text-gray-300 hover:text-[#00f0ff] transition"
-              >
-                Preencher: admin@juninbarbeiro.com / admin123
-              </button>
-              <button
-                type="button"
-                onClick={() => fillQuickDemo("pin")}
-                className="px-2.5 py-1 text-xs rounded-lg bg-[#14161c] hover:bg-[#1f222d] border border-[#272a34] text-gray-300 hover:text-[#00f0ff] transition"
-              >
-                Usar PIN 1234
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Security badge note */}
