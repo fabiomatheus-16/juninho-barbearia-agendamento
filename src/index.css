@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: #101115;
+    --card: #181a20;
+    --card-hover: #1f222a;
+    --card-foreground: #f3f4f6;
+    --border: #272a34;
+    --border-subtle: #1e2129;
+    --input: #1e2129;
+    --ring: #00e5ff;
+    --primary: #00d2ff;
+    --primary-glow: rgba(0, 210, 255, 0.35);
+    --primary-foreground: #090a0f;
+    --secondary: #1f222a;
+    --secondary-foreground: #f3f4f6;
+    --muted: #1e2129;
+    --muted-foreground: #9ca3af;
+    --accent: #162a36;
+    --accent-foreground: #38bdf8;
+    --success: #10b981;
+    --success-foreground: #022c22;
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+    --radius: 1rem;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--card-foreground);
+    font-family: "Manrope", system-ui, -apple-system, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: "Fraunces", Georgia, serif;
+  }
+}
+
+/* Custom Neon & Glass Utility Styles */
+.glow-primary {
+  box-shadow: 0 0 25px -4px rgba(0, 210, 255, 0.45);
+}
+
+.glow-subtle {
+  box-shadow: 0 4px 20px -2px rgba(0, 210, 255, 0.15);
+}
+
+.glow-card {
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+}
+
+.bg-gradient-neon {
+  background: linear-gradient(135deg, #00f0ff 0%, #0099ff 100%);
+}
+
+.text-gradient-neon {
+  background: linear-gradient(135deg, #38bdf8 0%, #00f0ff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

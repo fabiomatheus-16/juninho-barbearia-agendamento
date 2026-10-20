@@ -1,0 +1,6 @@
+{
+  "name": "Junin Barbeiro — Sistema SaaS de Agendamento & Gestão",
+  "description": "Sistema completo de agendamento online e gestão para barbearia com painel exclusivo do administrador, gestão de serviços, agenda diária e confirmação via WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
