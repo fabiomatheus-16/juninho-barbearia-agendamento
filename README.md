@@ -1,70 +1,54 @@
-🚀 Sobre o Projeto
+<p align="center">
+  <h3 align="center">💈 Junin Barbeiro — Sistema SaaS de Agendamento & Gestão</h3>
+</p>
 
-O Junin Barbeiro é um SaaS projetado para otimizar o fluxo de atendimento de barbearias modernas. Ele oferece uma experiência fluida para os clientes realizarem agendamentos online e uma área administrativa robusta e segura para os barbeiros gerenciarem serviços, preços, horários e o status dos agendamentos em tempo real.
+<p align="center">
+  <img src="https://img.shields.io/badge/Status-Em%20Produ%C3%A7%C3%A3o-brightgreen?style=for-the-badge" alt="Status Em Produção">
+  <img src="https://img.shields.io/badge/React-18-blue?style=for-the-badge&logo=react" alt="React">
+  <img src="https://img.shields.io/badge/TypeScript-Ready-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
+  <img src="https://img.shields.io/badge/TailwindCSS-Ready-38BDF8?style=for-the-badge&logo=tailwindcss" alt="TailwindCSS">
+  <img src="https://img.shields.io/badge/Supabase-Database-3ECF8E?style=for-the-badge&logo=supabase" alt="Supabase">
+  <img src="https://img.shields.io/badge/Vercel-Deployed-black?style=for-the-badge&logo=vercel" alt="Vercel">
+</p>
 
-✨ Principais Funcionalidades
+---
 
-Fluxo de Agendamento Inteligente (Cliente):
+## 🚀 Sobre o Projeto
 
-Escolha intuitiva de serviços e preços atualizados.
+O **Junin Barbeiro** é uma solução SaaS moderna, mobile-first e altamente performática desenvolvida para barbearias. O sistema automatiza o fluxo de marcação de horários para clientes e oferece um painel administrativo completo e seguro para a gestão de serviços, preços, barbeiros e agendamentos em tempo real.
 
-Seleção de horários disponíveis integrada ao banco de dados.
+---
 
-Área Administrativa Segura (Barbeiros):
+## ✨ Principais Funcionalidades
 
-Login restrito por E-mail & Senha ou PIN rápido de 4 dígitos.
+### 👤 Para os Clientes (Área Pública)
+* **Agendamento Online Rápido:** Escolha de serviços, seleção de barbeiro, data e horário de forma intuitiva.
+* **Tabela de Serviços Atualizada:** Visualização em tempo real dos serviços disponíveis e valores.
+* **Interface Moderna (Dark Mode & Neon):** Design responsivo com identidade visual marcante.
 
-Gestão centralizada de serviços e catálogo da barbearia.
+### 🛡️ Para os Administradores / Barbeiros (Área Restrita)
+* **Autenticação Segura:** Login via E-mail/Senha ou PIN rápido de 4 dígitos.
+* **Gestão de Agendamentos:** Visualização centralizada de todos os horários marcados, com opções de confirmação, cancelamento e controlo de fluxo.
+* **Gestão de Serviços e Preços:** Atualização dinâmica do catálogo da barbearia sincronizada com a nuvem.
 
-Painel de Gestão de Agendamentos: Visualização de todos os horários marcados com opções para confirmar, cancelar ou registrar faltas (no-show).
+---
 
-Design Moderno (Dark Mode & Neon):
+## 🛠️ Tecnologias Utilizadas
 
-Interface desenvolvida com TailwindCSS e ícones dinâmicos (lucide-react), trazendo identidade visual exclusiva em tons de ciano neon e acabamento premium.
+Este projeto foi construído utilizando tecnologias modernas de desenvolvimento web:
 
-🛠️ Tecnologias Utilizadas
+* **Frontend:** React, TypeScript, Vite
+* **Estilização:** TailwindCSS, Lucide Icons
+* **Banco de Dados & Backend:** Supabase (PostgreSQL em nuvem)
+* **Hospedagem & Deploy Contínuo:** Vercel
 
-Este projeto foi construído utilizando tecnologias modernas de mercado:
+---
 
-Frontend: React, TypeScript, Vite, TailwindCSS
+## ⚙️ Configuração e Instalação Local
 
-Ícones: Lucide React
+Se desejar clonar e executar o projeto na sua máquina para testes ou desenvolvimento:
 
-Banco de Dados & Backend: Supabase (PostgreSQL em nuvem)
-
-Hospedagem & Deploy Contínuo: Vercel
-
-📦 Como Executar o Projeto Localmente
-
-Se desejar rodar o projeto na sua máquina para testes ou desenvolvimento:
-
-Clone o repositório:
-
-git clone https://github.com/fabiomatheus-16/juninho-barbearia-agendamento.git
-cd juninho-barbearia-agendamento
-
-
-Instale as dependências:
-
-npm install
-
-
-Configure as Variáveis de Ambiente:
-Crie um arquivo .env na raiz do projeto com as suas credenciais do Supabase:
-
-VITE_SUPABASE_URL=sua_url_do_supabase_aqui
-VITE_SUPABASE_PUBLISHABLE_KEY=sua_chave_publica_aqui
-
-
-Inicie o servidor de desenvolvimento:
-
-npm run dev
-
-
-🌐 Deploy e Produção
-
-O projeto está configurado para deploy automático na Vercel sempre que um git push é realizado na branch principal (main).
-
-📄 Licença
-
-Distribuído sob a licença MIT. Sinta-se à vontade para utilizar, modificar e adaptar este projeto para o seu negócio!
+1. **Clone o repositório:**
+   ```bash
+   git clone [https://github.com/fabiomatheus-16/juninho-barbearia-agendamento.git](https://github.com/fabiomatheus-16/juninho-barbearia-agendamento.git)
+   cd juninho-barbearia-agendamento
