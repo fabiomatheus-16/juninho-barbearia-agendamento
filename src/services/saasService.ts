@@ -50,46 +50,17 @@ export interface BarbershopDataService {
  * O usuário pode copiar e colar este script no SQL Editor do Supabase quando quiser conectar a nuvem.
  */
 export const SUPABASE_MIGRATION_SQL = `-- ========================================================
--- JUNIN BARBEIRO - ESTRUTURA MULTI-TENANT PARA O SUPABASE
+-- JUNIN BARBEIRO - ESTRUTURA OFICIAL PARA O SUPABASE (SQL)
+-- Execute este script no SQL Editor do Supabase (Run)
+-- 100% Idempotente: pode ser executado várias vezes sem erros!
 -- ========================================================
 
--- 1. Tabela de Tenants (Barbearias assinantes do SaaS)
-CREATE TABLE IF NOT EXISTS public.tenants (
-  id text PRIMARY KEY DEFAULT 'junin-barbeiro-natal',
-  slug text UNIQUE NOT NULL,
-  name text NOT NULL,
-  owner_email text NOT NULL,
-  phone text NOT NULL,
-  plan text NOT NULL DEFAULT 'pro',
-  active boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
+-- 1. EXTENSÃO PARA UUIDs (Nativa do PostgreSQL/Supabase)
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- Inserir tenant padrão da barbearia
-INSERT INTO public.tenants (id, slug, name, owner_email, phone)
-VALUES ('junin-barbeiro-natal', 'junin-barbeiro', 'Junin Barbeiro', 'admin@juninbarbeiro.com', '5584994571579')
-ON CONFLICT (id) DO NOTHING;
-
--- 2. Tabela de Barbeiros (vinculados ao tenant)
-CREATE TABLE IF NOT EXISTS public.barbers (
-  id text PRIMARY KEY,
-  tenant_id text REFERENCES public.tenants(id) ON DELETE CASCADE NOT NULL DEFAULT 'junin-barbeiro-natal',
-  name text NOT NULL,
-  specialty text,
-  commission numeric(5,2) NOT NULL DEFAULT 100,
-  active boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
--- Inserir barbeiro padrão (Juninho)
-INSERT INTO public.barbers (id, tenant_id, name, specialty, commission, active)
-VALUES ('barber-1', 'junin-barbeiro-natal', 'Juninho', 'Cortes modernos, nevou e barba', 100, true)
-ON CONFLICT (id) DO NOTHING;
-
--- 3. Tabela de Serviços (com tenant_id para suportar múltiplas barbearias)
+-- 2. TABELA DE SERVIÇOS
 CREATE TABLE IF NOT EXISTS public.services (
-  id text PRIMARY KEY,
-  tenant_id text REFERENCES public.tenants(id) ON DELETE CASCADE NOT NULL DEFAULT 'junin-barbeiro-natal',
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   price numeric(10,2) NOT NULL DEFAULT 0,
   duration integer NOT NULL DEFAULT 30,
@@ -97,51 +68,79 @@ CREATE TABLE IF NOT EXISTS public.services (
   description text,
   active boolean NOT NULL DEFAULT true,
   sort_order integer NOT NULL DEFAULT 0,
+  tenant_id text DEFAULT 'junin-barbeiro-natal',
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Inserir os 5 serviços oficiais solicitados
-INSERT INTO public.services (id, tenant_id, name, price, duration, category, sort_order) VALUES
-  ('svc-1', 'junin-barbeiro-natal', 'Nevou + corte', 75.00, 90, 'Química & Corte', 1),
-  ('svc-2', 'junin-barbeiro-natal', 'Reflexo alinhado + corte', 75.00, 90, 'Química & Corte', 2),
-  ('svc-3', 'junin-barbeiro-natal', 'Corte navalhado', 20.00, 30, 'Cortes', 3),
-  ('svc-4', 'junin-barbeiro-natal', 'Corte pigmentado', 35.00, 45, 'Cortes', 4),
-  ('svc-5', 'junin-barbeiro-natal', 'Barba', 10.00, 20, 'Barba', 5)
-ON CONFLICT (id) DO NOTHING;
-
--- 4. Tabela de Agendamentos (com tenant_id e barber_id)
+-- 3. TABELA DE AGENDAMENTOS
 CREATE TABLE IF NOT EXISTS public.appointments (
-  id text PRIMARY KEY,
-  tenant_id text REFERENCES public.tenants(id) ON DELETE CASCADE NOT NULL DEFAULT 'junin-barbeiro-natal',
-  service_id text REFERENCES public.services(id) ON DELETE RESTRICT NOT NULL,
-  barber_id text REFERENCES public.barbers(id) ON DELETE RESTRICT NOT NULL,
+  id text PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  service_id text NOT NULL,
+  barber_id text NOT NULL DEFAULT 'barber-1',
   date date NOT NULL,
   time text NOT NULL,
   client_name text NOT NULL,
   client_phone text NOT NULL,
-  status text NOT NULL DEFAULT 'agendado', -- agendado, concluido, cancelado, faltou
+  status text NOT NULL DEFAULT 'agendado',
   notes text,
+  tenant_id text DEFAULT 'junin-barbeiro-natal',
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- 5. Índices de alta performance
-CREATE INDEX IF NOT EXISTS idx_services_tenant ON public.services(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_barbers_tenant ON public.barbers(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_appointments_tenant_date ON public.appointments(tenant_id, date);
-CREATE INDEX IF NOT EXISTS idx_appointments_barber_date ON public.appointments(barber_id, date);
+-- 4. ÍNDICES DE PERFORMANCE
+CREATE INDEX IF NOT EXISTS idx_services_sort ON public.services(sort_order);
+CREATE INDEX IF NOT EXISTS idx_appointments_date_time ON public.appointments(date, time);
 
--- 6. Políticas de RLS (Permitir leitura, inserção, edição e exclusão)
+-- 5. HABILITAR PERMISSÕES (ROW LEVEL SECURITY - RLS)
 ALTER TABLE public.services ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.barbers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.appointments ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Acesso total a servicos" ON public.services FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Acesso total a barbeiros" ON public.barbers FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Acesso total a agendamentos" ON public.appointments FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Acesso total aos servicos" ON public.services;
+CREATE POLICY "Acesso total aos servicos"
+  ON public.services FOR ALL
+  USING (true)
+  WITH CHECK (true);
 
--- 7. Publicação em Tempo Real (Realtime)
-ALTER PUBLICATION supabase_realtime ADD TABLE public.services;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.appointments;
+DROP POLICY IF EXISTS "Acesso total aos agendamentos" ON public.appointments;
+CREATE POLICY "Acesso total aos agendamentos"
+  ON public.appointments FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+-- 6. HABILITAR SINCRONIZAÇÃO EM TEMPO REAL (REALTIME DE FORMA SEGURA)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables 
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'services'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.services;
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables 
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'appointments'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.appointments;
+    END IF;
+  END IF;
+END $$;
+
+-- 7. POVOAR COM OS 5 SERVIÇOS OFICIAIS DO JUNIN BARBEIRO (Sem duplicar se já existirem)
+INSERT INTO public.services (name, price, duration, category, sort_order)
+SELECT v.name, v.price, v.duration, v.category, v.sort_order
+FROM (
+  VALUES
+    ('Nevou + corte', 75.00::numeric, 90::integer, 'Química & Corte', 1::integer),
+    ('Reflexo alinhado + corte', 75.00::numeric, 90::integer, 'Química & Corte', 2::integer),
+    ('Corte navalhado', 20.00::numeric, 30::integer, 'Cortes', 3::integer),
+    ('Corte pigmentado', 35.00::numeric, 45::integer, 'Cortes', 4::integer),
+    ('Barba', 10.00::numeric, 20::integer, 'Barba', 5::integer)
+) AS v(name, price, duration, category, sort_order)
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.services s WHERE s.name = v.name
+);
 `;
 
 /**

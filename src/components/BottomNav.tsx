@@ -1,5 +1,5 @@
 import React from "react";
-import { Home, CalendarPlus, Scissors, Shield, LayoutDashboard } from "lucide-react";
+import { Home, CalendarPlus, Shield, LayoutDashboard } from "lucide-react";
 
 export type NavTab = "home" | "booking" | "barber" | "admin";
 
@@ -14,20 +14,32 @@ export function BottomNav({
   onSelectTab,
   isAdminLoggedIn,
 }: BottomNavProps) {
-  const items = [
-    { id: "home" as NavTab, label: "Início", icon: Home },
-    { id: "booking" as NavTab, label: "Agendar", icon: CalendarPlus },
-    { id: "barber" as NavTab, label: "Minha Agenda", icon: Scissors },
-    {
-      id: "admin" as NavTab,
-      label: isAdminLoggedIn ? "Gestão Admin" : "Login Admin",
-      icon: isAdminLoggedIn ? LayoutDashboard : Shield,
-    },
+  // Itens públicos visíveis para os clientes
+  const items: { id: NavTab; label: string; icon: React.ElementType }[] = [
+    { id: "home", label: "Início", icon: Home },
+    { id: "booking", label: "Agendar", icon: CalendarPlus },
   ];
+
+  // Exibe a aba de administração apenas quando autenticado ou na tela de admin
+  if (isAdminLoggedIn) {
+    items.push({
+      id: "admin",
+      label: "Gestão Admin",
+      icon: LayoutDashboard,
+    });
+  } else if (currentTab === "admin") {
+    items.push({
+      id: "admin",
+      label: "Login Admin",
+      icon: Shield,
+    });
+  }
+
+  const gridColsClass = items.length === 2 ? "grid-cols-2" : "grid-cols-3";
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[#272a34] bg-[#101115]/95 backdrop-blur-lg pb-[env(safe-area-inset-bottom)] shadow-[0_-5px_25px_rgba(0,0,0,0.6)]">
-      <div className="mx-auto grid max-w-md grid-cols-4">
+      <div className={`mx-auto grid max-w-md ${gridColsClass}`}>
         {items.map((item) => {
           const Icon = item.icon;
           const isActive = currentTab === item.id;
@@ -44,7 +56,7 @@ export function BottomNav({
             >
               {/* Active top line glow */}
               {isActive && (
-                <span className="absolute top-0 inset-x-4 h-0.5 bg-gradient-to-r from-transparent via-[#00f0ff] to-transparent shadow-[0_0_8px_#00f0ff]" />
+                <span className="absolute top-0 inset-x-8 sm:inset-x-12 h-0.5 bg-gradient-to-r from-transparent via-[#00f0ff] to-transparent shadow-[0_0_8px_#00f0ff]" />
               )}
 
               <div
@@ -55,7 +67,7 @@ export function BottomNav({
                 <Icon className="size-5" />
               </div>
               <span
-                className={`text-[10px] tracking-tight ${
+                className={`text-[11px] tracking-tight ${
                   isActive ? "font-bold text-[#00f0ff]" : "font-medium"
                 }`}
               >
@@ -68,3 +80,4 @@ export function BottomNav({
     </nav>
   );
 }
+

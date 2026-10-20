@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Lock, Mail, KeyRound, ArrowRight, ShieldCheck, ArrowLeft, Eye, EyeOff } from "lucide-react";
-import { actions, useStore } from "../lib/store";
+import { actions } from "../lib/store";
 import { BrandLogo } from "./ui/BrandLogo";
 
 interface AdminLoginProps {
@@ -9,8 +9,6 @@ interface AdminLoginProps {
 }
 
 export function AdminLogin({ onSuccess, onBackToHome }: AdminLoginProps) {
-  const adminCredentials = useStore((s) => s.adminCredentials);
-
   const [mode, setMode] = useState<"credentials" | "pin">("credentials");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -190,6 +188,9 @@ export function AdminLogin({ onSuccess, onBackToHome }: AdminLoginProps) {
                     className="w-full h-14 rounded-xl bg-[#14161c] border border-[#272a34] text-center tracking-[0.5em] text-2xl font-bold text-[#00f0ff] focus:outline-none focus:border-[#00f0ff] focus:ring-1 focus:ring-[#00f0ff] transition"
                   />
                 </div>
+                <p className="text-[11px] text-gray-500 text-center mt-2">
+                  PIN numérico de 4 dígitos de acesso restrito
+                </p>
               </div>
             )}
 

@@ -84,6 +84,10 @@ export async function fetchServicesFromCloud(): Promise<Service[] | null> {
   }
 }
 
+function isValidUUID(str: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
 /**
  * Salva ou atualiza serviço no Supabase em nuvem
  */
@@ -99,7 +103,7 @@ export async function saveServiceToCloud(service: Omit<Service, "id"> & { id?: s
       sort_order: service.sortOrder ?? 0,
     };
 
-    if (service.id) {
+    if (service.id && isValidUUID(service.id)) {
       const { data, error } = await supabase
         .from("services")
         .update(payload)
@@ -107,19 +111,38 @@ export async function saveServiceToCloud(service: Omit<Service, "id"> & { id?: s
         .select("id")
         .maybeSingle();
 
-      if (error) return null;
+      if (error) {
+        console.warn("Supabase update service error:", error.message);
+        return null;
+      }
       return data ? String(data.id) : service.id;
     } else {
+      // Se não tem UUID válido, verifica se já existe pelo nome para atualizar ou inserir
+      const { data: existing } = await supabase
+        .from("services")
+        .select("id")
+        .eq("name", service.name)
+        .maybeSingle();
+
+      if (existing?.id) {
+        await supabase.from("services").update(payload).eq("id", existing.id);
+        return String(existing.id);
+      }
+
       const { data, error } = await supabase
         .from("services")
         .insert(payload)
         .select("id")
         .maybeSingle();
 
-      if (error) return null;
+      if (error) {
+        console.warn("Supabase insert service error:", error.message);
+        return null;
+      }
       return data ? String(data.id) : null;
     }
-  } catch {
+  } catch (err) {
+    console.warn("saveServiceToCloud caught error:", err);
     return null;
   }
 }
@@ -129,8 +152,11 @@ export async function saveServiceToCloud(service: Omit<Service, "id"> & { id?: s
  */
 export async function deleteServiceFromCloud(serviceId: string): Promise<boolean> {
   try {
-    const { error } = await supabase.from("services").delete().eq("id", serviceId);
-    return !error;
+    if (isValidUUID(serviceId)) {
+      const { error } = await supabase.from("services").delete().eq("id", serviceId);
+      return !error;
+    }
+    return true;
   } catch {
     return false;
   }
