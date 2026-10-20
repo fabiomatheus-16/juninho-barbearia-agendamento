@@ -7,6 +7,7 @@ import {
   fetchServicesFromCloud,
   saveAppointmentToCloud,
   updateAppointmentStatusInCloud,
+  deleteAppointmentFromCloud,
   fetchAppointmentsFromCloud,
   supabase,
 } from "./supabaseClient";
@@ -648,6 +649,8 @@ export const actions = {
       saveStored(STORAGE_KEYS.APPOINTMENTS, next);
       return { ...s, appointments: next };
     });
+
+    void deleteAppointmentFromCloud(id);
   },
 
   // Admin Authentication Actions

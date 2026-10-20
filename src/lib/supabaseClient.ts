@@ -242,3 +242,16 @@ export async function updateAppointmentStatusInCloud(id: string, status: Status)
     return false;
   }
 }
+
+/**
+ * Exclui agendamento no Supabase em nuvem
+ */
+export async function deleteAppointmentFromCloud(id: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from("appointments").delete().eq("id", id);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+

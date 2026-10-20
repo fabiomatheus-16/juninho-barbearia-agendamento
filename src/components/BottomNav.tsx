@@ -1,7 +1,7 @@
 import React from "react";
 import { Home, CalendarPlus, Shield, LayoutDashboard } from "lucide-react";
 
-export type NavTab = "home" | "booking" | "barber" | "admin";
+export type NavTab = "home" | "booking" | "admin";
 
 interface BottomNavProps {
   currentTab: NavTab;

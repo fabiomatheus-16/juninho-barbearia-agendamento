@@ -17,6 +17,7 @@ import {
   CheckCircle,
   AlertTriangle,
   ChevronRight,
+  ChevronLeft,
   UserCheck,
   Calendar,
   Award,
@@ -27,8 +28,15 @@ import {
   Layers,
   Building2,
   Check,
+  MessageCircle,
+  Phone,
+  UserX,
+  X,
+  RefreshCw,
+  CalendarDays,
+  Filter,
 } from "lucide-react";
-import type { Service, Barber, Appointment } from "../types";
+import type { Service, Barber, Appointment, Status } from "../types";
 import {
   actions,
   brl,
@@ -37,6 +45,10 @@ import {
   calculateFinancialSummary,
   SHOP,
   useStore,
+  todayISO,
+  buildWhatsappLink,
+  TIME_SLOTS,
+  isOpenDate,
 } from "../lib/store";
 import {
   DEFAULT_TENANT_ID,
@@ -48,6 +60,40 @@ import { VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY } from "../lib/supabas
 import { ServiceModal } from "./ServiceModal";
 import { BrandLogo } from "./ui/BrandLogo";
 
+const STATUS_CONFIG: Record<
+  Status,
+  { label: string; bg: string; text: string; border: string; dot: string }
+> = {
+  agendado: {
+    label: "Agendado",
+    bg: "bg-[#00f0ff]/10",
+    text: "text-[#00f0ff]",
+    border: "border-[#00f0ff]/30",
+    dot: "bg-[#00f0ff]",
+  },
+  concluido: {
+    label: "Concluído",
+    bg: "bg-emerald-500/15",
+    text: "text-emerald-400",
+    border: "border-emerald-500/30",
+    dot: "bg-emerald-400",
+  },
+  cancelado: {
+    label: "Cancelado",
+    bg: "bg-gray-800/80",
+    text: "text-gray-400",
+    border: "border-gray-700",
+    dot: "bg-gray-500",
+  },
+  faltou: {
+    label: "Falta (No-show)",
+    bg: "bg-red-500/15",
+    text: "text-red-400",
+    border: "border-red-500/30",
+    dot: "bg-red-400",
+  },
+};
+
 interface AdminPanelProps {
   onLogout: () => void;
 }
@@ -56,10 +102,30 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
   const { services, barbers, appointments, adminAuth, adminCredentials, supabaseConfig } =
     useStore((s) => s);
 
-  // Sub-tabs
+  // Sub-tabs (Agenda como aba principal integrada)
   const [activeTab, setActiveTab] = useState<
-    "services" | "barbers" | "reports" | "settings"
-  >("services");
+    "appointments" | "services" | "barbers" | "reports" | "settings"
+  >("appointments");
+
+  // Filtros da Agenda / Agendamentos
+  const [selectedDate, setSelectedDate] = useState<string>(todayISO());
+  const [dateFilterMode, setDateFilterMode] = useState<"day" | "all">("day");
+  const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
+  const [barberFilter, setBarberFilter] = useState<string>("all");
+  const [appointmentSearch, setAppointmentSearch] = useState<string>("");
+
+  // Modal de Exclusão de Agendamento
+  const [deletingAppointment, setDeletingAppointment] = useState<Appointment | null>(null);
+
+  // Modal de Novo Agendamento Rápido pelo Admin
+  const [isAddApptModalOpen, setIsAddApptModalOpen] = useState(false);
+  const [newApptClientName, setNewApptClientName] = useState("");
+  const [newApptClientPhone, setNewApptClientPhone] = useState("");
+  const [newApptServiceId, setNewApptServiceId] = useState("");
+  const [newApptBarberId, setNewApptBarberId] = useState("barber-1");
+  const [newApptDate, setNewApptDate] = useState(todayISO());
+  const [newApptTime, setNewApptTime] = useState("09:00");
+  const [newApptNotes, setNewApptNotes] = useState("");
 
   // Ranking period filter
   const [rankingPeriod, setRankingPeriod] = useState<"month" | "week" | "today" | "all">(
@@ -106,6 +172,117 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
 
   // Financial calculations
   const financial = calculateFinancialSummary(appointments, services, rankingPeriod);
+
+  // Handlers da Agenda / Agendamentos
+  const handleSetAppointmentStatus = (id: string, newStatus: Status) => {
+    actions.setAppointmentStatus(id, newStatus);
+    if (newStatus === "concluido") {
+      showToast("Atendimento marcado como Concluído!");
+    } else if (newStatus === "faltou") {
+      showToast("Atendimento marcado como Falta (No-show)!");
+    } else if (newStatus === "cancelado") {
+      showToast("Agendamento cancelado com sucesso.");
+    } else {
+      showToast("Agendamento reaberto como pendente!");
+    }
+  };
+
+  const handleConfirmDeleteAppt = () => {
+    if (!deletingAppointment) return;
+    const client = deletingAppointment.clientName;
+    actions.deleteAppointment(deletingAppointment.id);
+    setDeletingAppointment(null);
+    showToast(`Agendamento de ${client} excluído com sucesso.`);
+  };
+
+  const changeDay = (delta: number) => {
+    const [y, m, d] = selectedDate.split("-").map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    dateObj.setDate(dateObj.getDate() + delta);
+    const ny = dateObj.getFullYear();
+    const nm = String(dateObj.getMonth() + 1).padStart(2, "0");
+    const nd = String(dateObj.getDate()).padStart(2, "0");
+    setSelectedDate(`${ny}-${nm}-${nd}`);
+    setDateFilterMode("day");
+  };
+
+  const handleCreateManualAppt = (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const activeSvcs = services.filter((s) => s.active !== false);
+      const svcId = newApptServiceId || activeSvcs[0]?.id || services[0]?.id;
+      if (!svcId) {
+        showToast("Nenhum serviço disponível.");
+        return;
+      }
+      actions.addAppointment({
+        serviceId: svcId,
+        barberId: newApptBarberId || barbers[0]?.id || "barber-1",
+        date: newApptDate,
+        time: newApptTime,
+        clientName: newApptClientName.trim(),
+        clientPhone: newApptClientPhone.trim(),
+        notes: newApptNotes.trim() || undefined,
+      });
+      setIsAddApptModalOpen(false);
+      setNewApptClientName("");
+      setNewApptClientPhone("");
+      setNewApptNotes("");
+      showToast("Agendamento criado e salvo no Supabase!");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Erro ao agendar horário.");
+    }
+  };
+
+  // Estatísticas e filtros da Agenda
+  const todayDate = todayISO();
+  const isSelectedDateToday = selectedDate === todayDate;
+  const todayAppointments = appointments.filter((a) => a.date === todayDate);
+  const todayPendingCount = todayAppointments.filter((a) => a.status === "agendado").length;
+
+  const filteredAppointments = appointments
+    .filter((appt) => {
+      if (dateFilterMode === "day" && appt.date !== selectedDate) {
+        return false;
+      }
+      if (barberFilter !== "all" && appt.barberId !== barberFilter) {
+        return false;
+      }
+      if (statusFilter !== "all" && appt.status !== statusFilter) {
+        return false;
+      }
+      if (appointmentSearch.trim()) {
+        const q = appointmentSearch.toLowerCase();
+        const matchName = appt.clientName.toLowerCase().includes(q);
+        const matchPhone = appt.clientPhone.toLowerCase().includes(q);
+        const matchNotes = appt.notes?.toLowerCase().includes(q) ?? false;
+        const svc = services.find((s) => s.id === appt.serviceId);
+        const matchSvc = svc?.name.toLowerCase().includes(q) ?? false;
+        if (!matchName && !matchPhone && !matchNotes && !matchSvc) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.time.localeCompare(b.time);
+    });
+
+  const getService = (serviceId: string) => services.find((s) => s.id === serviceId);
+  const getBarber = (barberId: string) => barbers.find((b) => b.id === barberId);
+
+  // Faturamento e contadores dos agendamentos exibidos
+  const completedInView = filteredAppointments.filter((a) => a.status === "concluido");
+  const revenueInView = completedInView.reduce((sum, a) => {
+    const svc = getService(a.serviceId);
+    return sum + (svc?.price || 0);
+  }, 0);
+  const pendingInView = filteredAppointments.filter((a) => a.status === "agendado").length;
+  const noShowInView = filteredAppointments.filter((a) => a.status === "faltou").length;
+  const canceledInView = filteredAppointments.filter((a) => a.status === "cancelado").length;
+
+  // Turnos (quando visualizando por dia)
+  const morningList = filteredAppointments.filter((a) => a.time < "12:00");
+  const afternoonList = filteredAppointments.filter((a) => a.time >= "12:00");
 
   // Service handlers
   const handleOpenAddService = () => {
@@ -248,6 +425,27 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
       {/* Navigation Tabs */}
       <div className="flex gap-2 p-1.5 rounded-2xl bg-[#14161c] border border-[#272a34] overflow-x-auto mb-6">
         <button
+          onClick={() => setActiveTab("appointments")}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
+            activeTab === "appointments"
+              ? "bg-[#00f0ff] text-[#090a0f] font-bold shadow-[0_0_15px_rgba(0,240,255,0.3)]"
+              : "text-gray-400 hover:text-white hover:bg-[#1a1d24]"
+          }`}
+        >
+          <Calendar className="size-4" />
+          Agenda & Atendimentos
+          <span
+            className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+              activeTab === "appointments"
+                ? "bg-[#090a0f] text-[#00f0ff]"
+                : "bg-[#00f0ff]/15 text-[#00f0ff]"
+            }`}
+          >
+            {todayPendingCount > 0 ? `${todayPendingCount} hoje` : appointments.length}
+          </span>
+        </button>
+
+        <button
           onClick={() => setActiveTab("services")}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
             activeTab === "services"
@@ -295,6 +493,334 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
           Configurações & SaaS
         </button>
       </div>
+
+      {/* TAB 0: AGENDA & AGENDAMENTOS (INTEGRADA DO ADMIN) */}
+      {activeTab === "appointments" && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Top Bar: Title & Quick Add */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg sm:text-xl font-bold text-white font-display">
+                  Gestão da Agenda & Atendimentos
+                </h2>
+                <span className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-semibold">
+                  <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Supabase Nuvem
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Controle de presença, confirmações via WhatsApp e gestão em tempo real
+              </p>
+            </div>
+
+            <button
+              onClick={() => {
+                const activeSvcs = services.filter((s) => s.active !== false);
+                setNewApptServiceId(activeSvcs[0]?.id || services[0]?.id || "");
+                setNewApptBarberId(barbers[0]?.id || "barber-1");
+                setNewApptDate(selectedDate || todayISO());
+                setNewApptTime("09:00");
+                setNewApptClientName("");
+                setNewApptClientPhone("");
+                setNewApptNotes("");
+                setIsAddApptModalOpen(true);
+              }}
+              className="h-10 px-4 rounded-xl bg-gradient-to-r from-[#00f0ff] to-[#0099ff] text-[#090a0f] font-bold text-xs sm:text-sm shadow-[0_0_20px_rgba(0,240,255,0.35)] hover:brightness-110 transition active:scale-95 flex items-center justify-center gap-1.5 shrink-0 self-start sm:self-auto"
+            >
+              <Plus className="size-4 stroke-[3]" />
+              Novo Agendamento
+            </button>
+          </div>
+
+          {/* Quick Metrics Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-4 rounded-2xl bg-[#161820] border border-[#272a34]">
+              <span className="text-[11px] font-medium text-gray-400 block">
+                {dateFilterMode === "day"
+                  ? isSelectedDateToday
+                    ? "Hoje na Barbearia"
+                    : `Dia ${selectedDate.split("-").reverse().slice(0, 2).join("/")}`
+                  : "Total Filtrado"}
+              </span>
+              <p className="font-display text-2xl font-bold text-white mt-1">
+                {filteredAppointments.length}
+              </p>
+              <span className="text-[11px] text-[#00f0ff] font-medium">
+                {pendingInView} pendente{pendingInView !== 1 ? "s" : ""}
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-[#161820] border border-emerald-500/25">
+              <span className="text-[11px] font-medium text-gray-400 block">
+                Concluídos & Faturados
+              </span>
+              <p className="font-display text-2xl font-bold text-emerald-400 mt-1">
+                {completedInView.length}
+              </p>
+              <span className="text-[11px] text-emerald-300 font-semibold">
+                {brl(revenueInView)}
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-[#161820] border border-[#272a34]">
+              <span className="text-[11px] font-medium text-gray-400 block">
+                Faltas (No-show)
+              </span>
+              <p className="font-display text-2xl font-bold text-red-400 mt-1">
+                {noShowInView}
+              </p>
+              <span className="text-[11px] text-gray-400">
+                {canceledInView} cancelado{canceledInView !== 1 ? "s" : ""}
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-[#161820] border border-[#272a34]">
+              <span className="text-[11px] font-medium text-gray-400 block">
+                Total Geral no Supabase
+              </span>
+              <p className="font-display text-2xl font-bold text-[#00f0ff] mt-1">
+                {appointments.length}
+              </p>
+              <span className="text-[11px] text-gray-400">
+                Registros sincronizados
+              </span>
+            </div>
+          </div>
+
+          {/* Date Navigator & Filter Controls */}
+          <div className="p-4 rounded-2xl bg-[#161820] border border-[#272a34] space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              {/* Stepper buttons & date display */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => changeDay(-1)}
+                  className="p-2 rounded-xl bg-[#1e222c] hover:bg-[#272d3a] text-gray-300 hover:text-white transition"
+                  aria-label="Dia anterior"
+                >
+                  <ChevronLeft className="size-4" />
+                </button>
+
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#12141a] border border-[#272a34]">
+                  <Calendar className="size-4 text-[#00f0ff]" />
+                  <span className="text-xs sm:text-sm font-bold text-white">
+                    {dateFilterMode === "day"
+                      ? isSelectedDateToday
+                        ? `Hoje (${formatDateBR(selectedDate)})`
+                        : formatDateBR(selectedDate)
+                      : "Todos os dias cadastrados"}
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => changeDay(1)}
+                  className="p-2 rounded-xl bg-[#1e222c] hover:bg-[#272d3a] text-gray-300 hover:text-white transition"
+                  aria-label="Próximo dia"
+                >
+                  <ChevronRight className="size-4" />
+                </button>
+              </div>
+
+              {/* Date Mode Toggles */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  onClick={() => {
+                    setSelectedDate(todayISO());
+                    setDateFilterMode("day");
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                    dateFilterMode === "day" && isSelectedDateToday
+                      ? "bg-[#00f0ff] text-[#090a0f] font-bold shadow-[0_0_10px_rgba(0,240,255,0.3)]"
+                      : "bg-[#1e222c] text-gray-300 hover:text-white hover:bg-[#252b37]"
+                  }`}
+                >
+                  Hoje
+                </button>
+
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      setSelectedDate(e.target.value);
+                      setDateFilterMode("day");
+                    }
+                  }}
+                  className="h-8 rounded-xl bg-[#1e222c] border border-[#2b303e] px-2.5 text-xs text-white focus:outline-none focus:border-[#00f0ff]"
+                />
+
+                <button
+                  onClick={() => setDateFilterMode(dateFilterMode === "all" ? "day" : "all")}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                    dateFilterMode === "all"
+                      ? "bg-[#00f0ff] text-[#090a0f] font-bold shadow-[0_0_10px_rgba(0,240,255,0.3)]"
+                      : "bg-[#1e222c] text-gray-300 hover:text-white hover:bg-[#252b37]"
+                  }`}
+                >
+                  Ver Todos
+                </button>
+              </div>
+            </div>
+
+            {/* Sub-filters: Barbeiro, Status & Search */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-[#22252e]">
+              {/* Search */}
+              <div className="relative">
+                <Search className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar cliente, tel ou serviço..."
+                  value={appointmentSearch}
+                  onChange={(e) => setAppointmentSearch(e.target.value)}
+                  className="w-full h-9 rounded-xl bg-[#12141a] border border-[#272a34] pl-9 pr-3 text-xs text-white focus:outline-none focus:border-[#00f0ff]"
+                />
+                {appointmentSearch && (
+                  <button
+                    onClick={() => setAppointmentSearch("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 hover:text-white"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              {/* Status Filter */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-gray-400 font-medium shrink-0">Status:</span>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as Status | "all")}
+                  className="w-full h-9 rounded-xl bg-[#12141a] border border-[#272a34] px-2.5 text-xs text-white focus:outline-none focus:border-[#00f0ff]"
+                >
+                  <option value="all">Todos os Status</option>
+                  <option value="agendado">Agendados (Pendentes)</option>
+                  <option value="concluido">Concluídos</option>
+                  <option value="faltou">Faltas (No-show)</option>
+                  <option value="cancelado">Cancelados</option>
+                </select>
+              </div>
+
+              {/* Barber Filter */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-gray-400 font-medium shrink-0">Barbeiro:</span>
+                <select
+                  value={barberFilter}
+                  onChange={(e) => setBarberFilter(e.target.value)}
+                  className="w-full h-9 rounded-xl bg-[#12141a] border border-[#272a34] px-2.5 text-xs text-white focus:outline-none focus:border-[#00f0ff]"
+                >
+                  <option value="all">Todos os Barbeiros</option>
+                  {barbers.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Agenda List View */}
+          {dateFilterMode === "day" ? (
+            <div className="space-y-6">
+              {/* Turno da Manhã */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="size-2 rounded-full bg-[#00f0ff]" />
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                      Turno da Manhã (08h às 12h)
+                    </h3>
+                  </div>
+                  <span className="text-xs text-gray-400">
+                    {morningList.length} atendimento{morningList.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+
+                {morningList.length === 0 ? (
+                  <div className="p-6 rounded-2xl bg-[#14161c] border border-[#22252e] text-center text-xs text-gray-500">
+                    Nenhum agendamento na manhã para este dia.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {morningList.map((appt) => (
+                      <AppointmentCard
+                        key={appt.id}
+                        appointment={appt}
+                        service={getService(appt.serviceId)}
+                        barber={getBarber(appt.barberId)}
+                        onSetStatus={handleSetAppointmentStatus}
+                        onDelete={(a) => setDeletingAppointment(a)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Turno da Tarde */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="size-2 rounded-full bg-[#0099ff]" />
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                      Turno da Tarde (14h às 18h)
+                    </h3>
+                  </div>
+                  <span className="text-xs text-gray-400">
+                    {afternoonList.length} atendimento{afternoonList.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+
+                {afternoonList.length === 0 ? (
+                  <div className="p-6 rounded-2xl bg-[#14161c] border border-[#22252e] text-center text-xs text-gray-500">
+                    Nenhum agendamento na tarde para este dia.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {afternoonList.map((appt) => (
+                      <AppointmentCard
+                        key={appt.id}
+                        appointment={appt}
+                        service={getService(appt.serviceId)}
+                        barber={getBarber(appt.barberId)}
+                        onSetStatus={handleSetAppointmentStatus}
+                        onDelete={(a) => setDeletingAppointment(a)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* Modo "Todos os Dias" */
+            <div className="space-y-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                  Listagem Geral de Agendamentos ({filteredAppointments.length})
+                </span>
+              </div>
+
+              {filteredAppointments.length === 0 ? (
+                <div className="p-8 rounded-2xl bg-[#14161c] border border-[#22252e] text-center text-xs text-gray-500">
+                  Nenhum agendamento encontrado com os filtros selecionados.
+                </div>
+              ) : (
+                filteredAppointments.map((appt) => (
+                  <AppointmentCard
+                    key={appt.id}
+                    appointment={appt}
+                    service={getService(appt.serviceId)}
+                    barber={getBarber(appt.barberId)}
+                    onSetStatus={handleSetAppointmentStatus}
+                    onDelete={(a) => setDeletingAppointment(a)}
+                    showDateBadge
+                  />
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
 
       {/* TAB 1: SERVICES (CRUD COMPLETO) */}
       {activeTab === "services" && (
@@ -1087,6 +1613,401 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
           </div>
         </div>
       )}
+
+      {/* MODAL: DELETE APPOINTMENT CONFIRMATION */}
+      {deletingAppointment && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={() => setDeletingAppointment(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-red-500/30 bg-[#161820] p-6 shadow-2xl text-white"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="size-12 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center mb-4">
+              <Trash2 className="size-6" />
+            </div>
+            <h3 className="text-xl font-bold font-display">Excluir Agendamento?</h3>
+            <p className="text-sm text-gray-300 mt-2">
+              Deseja realmente remover o agendamento de{" "}
+              <strong className="text-white">"{deletingAppointment.clientName}"</strong> em{" "}
+              <strong className="text-[#00f0ff]">{formatDateBR(deletingAppointment.date)} às {deletingAppointment.time}</strong>?
+            </p>
+            <p className="text-xs text-gray-400 mt-2">
+              Esta ação removerá o agendamento permanentemente da base do Supabase em nuvem.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => setDeletingAppointment(null)}
+                className="h-11 rounded-xl bg-[#1e222c] border border-[#2b303e] text-gray-300 font-semibold text-xs hover:text-white"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteAppt}
+                className="h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-xs shadow-lg transition active:scale-95"
+              >
+                Sim, Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: NOVO AGENDAMENTO RÁPIDO ADMIN */}
+      {isAddApptModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={() => setIsAddApptModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-3xl border border-[#272a34] bg-[#161820] p-6 shadow-2xl text-white max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-4 border-b border-[#272a34] mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-[#00f0ff]/10 text-[#00f0ff]">
+                  <Calendar className="size-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold font-display text-white">
+                    Novo Agendamento na Barbearia
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    Cadastrar cliente manualmente direto no Supabase
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsAddApptModalOpen(false)}
+                className="p-2 rounded-xl bg-[#1e222c] hover:bg-[#282f3d] text-gray-400 hover:text-white"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateManualAppt} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
+                  Nome do Cliente *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: João da Silva"
+                  value={newApptClientName}
+                  onChange={(e) => setNewApptClientName(e.target.value)}
+                  className="w-full h-11 rounded-xl bg-[#1c202a] border border-[#2b303e] px-4 text-white text-sm focus:outline-none focus:border-[#00f0ff]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
+                  WhatsApp / Telefone *
+                </label>
+                <input
+                  type="tel"
+                  required
+                  placeholder="Ex: 84994571579"
+                  value={newApptClientPhone}
+                  onChange={(e) => setNewApptClientPhone(e.target.value)}
+                  className="w-full h-11 rounded-xl bg-[#1c202a] border border-[#2b303e] px-4 text-white text-sm focus:outline-none focus:border-[#00f0ff]"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
+                    Serviço Desejado *
+                  </label>
+                  <select
+                    value={newApptServiceId}
+                    onChange={(e) => setNewApptServiceId(e.target.value)}
+                    className="w-full h-11 rounded-xl bg-[#1c202a] border border-[#2b303e] px-3 text-white text-xs focus:outline-none focus:border-[#00f0ff]"
+                  >
+                    {services
+                      .filter((s) => s.active !== false)
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({brl(s.price)})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
+                    Barbeiro *
+                  </label>
+                  <select
+                    value={newApptBarberId}
+                    onChange={(e) => setNewApptBarberId(e.target.value)}
+                    className="w-full h-11 rounded-xl bg-[#1c202a] border border-[#2b303e] px-3 text-white text-xs focus:outline-none focus:border-[#00f0ff]"
+                  >
+                    {barbers.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
+                    Data *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={newApptDate}
+                    onChange={(e) => setNewApptDate(e.target.value)}
+                    className="w-full h-11 rounded-xl bg-[#1c202a] border border-[#2b303e] px-3 text-white text-xs focus:outline-none focus:border-[#00f0ff]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
+                    Horário *
+                  </label>
+                  <select
+                    value={newApptTime}
+                    onChange={(e) => setNewApptTime(e.target.value)}
+                    className="w-full h-11 rounded-xl bg-[#1c202a] border border-[#2b303e] px-3 text-white text-xs focus:outline-none focus:border-[#00f0ff]"
+                  >
+                    {TIME_SLOTS.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
+                  Observações / Preferências (Opcional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: Prefere degradê na zero alta"
+                  value={newApptNotes}
+                  onChange={(e) => setNewApptNotes(e.target.value)}
+                  className="w-full h-11 rounded-xl bg-[#1c202a] border border-[#2b303e] px-4 text-white text-xs focus:outline-none focus:border-[#00f0ff]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setIsAddApptModalOpen(false)}
+                  className="h-11 rounded-xl bg-[#1e222c] border border-[#2b303e] text-gray-300 font-semibold text-xs hover:text-white"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="h-11 rounded-xl bg-gradient-to-r from-[#00f0ff] to-[#0099ff] text-[#090a0f] font-bold text-xs shadow-lg hover:brightness-110 transition active:scale-95"
+                >
+                  Confirmar Agendamento
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+function AppointmentCard({
+  appointment,
+  service,
+  barber,
+  onSetStatus,
+  onDelete,
+  showDateBadge,
+}: {
+  appointment: Appointment;
+  service?: Service;
+  barber?: Barber;
+  onSetStatus: (id: string, status: Status) => void;
+  onDelete: (appointment: Appointment) => void;
+  showDateBadge?: boolean;
+}) {
+  const statusCfg = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.agendado;
+
+  const whatsappMessage = `Olá, ${appointment.clientName}! Aqui é da barbearia ${SHOP.name}. Passando para confirmar seu agendamento no dia ${formatDateBR(appointment.date)} às ${appointment.time}${service ? ` para ${service.name}` : ""}. Tudo confirmado?`;
+  const whatsappUrl = buildWhatsappLink(appointment.clientPhone, whatsappMessage);
+
+  return (
+    <div
+      className={`p-4 sm:p-5 rounded-2xl border transition-all ${
+        appointment.status === "concluido"
+          ? "bg-[#14191d] border-emerald-500/25"
+          : appointment.status === "cancelado"
+          ? "bg-[#14151a] border-[#22252e] opacity-60"
+          : appointment.status === "faltou"
+          ? "bg-[#1b1418] border-red-500/25"
+          : "bg-[#161820] border-[#272a34] hover:border-[#00f0ff]/40 shadow-sm"
+      }`}
+    >
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+        {/* Left: Time, Client info, Service details */}
+        <div className="flex items-start gap-3.5 min-w-0">
+          {/* Time & Duration badge */}
+          <div className="text-center bg-[#1c202a] border border-[#2b303e] rounded-xl px-2.5 py-2 shrink-0 min-w-[62px]">
+            <span className="text-sm font-bold font-mono text-[#00f0ff] block leading-none">
+              {appointment.time}
+            </span>
+            <span className="text-[10px] text-gray-400 mt-1 block font-mono">
+              {service?.duration ? `${service.duration}m` : "30m"}
+            </span>
+          </div>
+
+          <div className="min-w-0">
+            {/* Date badge if showDateBadge */}
+            {showDateBadge && (
+              <span className="inline-block text-[10px] font-bold uppercase text-[#00f0ff] bg-[#00f0ff]/10 px-2 py-0.5 rounded border border-[#00f0ff]/20 mb-1">
+                {formatDateBR(appointment.date)} ({appointment.date.split("-").reverse().join("/")})
+              </span>
+            )}
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-base font-bold text-white leading-snug">
+                {appointment.clientName}
+              </h3>
+              {barber && (
+                <span className="text-[10px] text-gray-400 bg-[#1e222c] px-2 py-0.5 rounded-md border border-[#272a34]">
+                  {barber.name}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-gray-400 mt-1 flex-wrap">
+              <a
+                href={`tel:${appointment.clientPhone}`}
+                className="hover:text-[#00f0ff] flex items-center gap-1 font-mono transition"
+                title="Ligar para o cliente"
+              >
+                <Phone className="size-3 text-gray-400" />
+                {appointment.clientPhone}
+              </a>
+              <span>•</span>
+              <span className="text-white font-semibold">
+                {service?.name || "Serviço"}
+              </span>
+              <span>•</span>
+              <span className="font-display font-bold text-[#00f0ff]">
+                {brl(service?.price || 0)}
+              </span>
+            </div>
+
+            {appointment.notes && (
+              <p className="text-xs text-amber-300/80 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2.5 py-1 mt-2 inline-block">
+                💬 <em>"{appointment.notes}"</em>
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Status badge */}
+        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 shrink-0">
+          <span
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border shrink-0 ${statusCfg.bg} ${statusCfg.text} ${statusCfg.border}`}
+          >
+            <span className={`size-1.5 rounded-full ${statusCfg.dot}`} />
+            {statusCfg.label}
+          </span>
+        </div>
+      </div>
+
+      {/* Action Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mt-3 pt-3 border-t border-[#22252e]">
+        {/* WhatsApp Link */}
+        <a
+          href={whatsappUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5 font-medium transition py-1"
+        >
+          <MessageCircle className="size-4 text-emerald-400" />
+          <span>Confirmar via WhatsApp</span>
+        </a>
+
+        {/* Status Actions */}
+        <div className="flex items-center gap-1.5 flex-wrap self-end sm:self-auto">
+          {appointment.status === "agendado" && (
+            <>
+              <button
+                onClick={() => onSetStatus(appointment.id, "concluido")}
+                className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition active:scale-95"
+                title="Confirmar e concluir atendimento"
+              >
+                <Check className="size-3.5" />
+                Confirmar / Concluir
+              </button>
+
+              <button
+                onClick={() => onSetStatus(appointment.id, "faltou")}
+                className="px-2.5 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center gap-1 transition"
+                title="Marcar que o cliente não compareceu"
+              >
+                <UserX className="size-3.5" />
+                Falta
+              </button>
+
+              <button
+                onClick={() => onSetStatus(appointment.id, "cancelado")}
+                className="px-2.5 py-1.5 rounded-xl bg-[#1e222c] hover:bg-gray-800 text-gray-400 hover:text-white text-xs font-medium transition"
+                title="Cancelar agendamento"
+              >
+                <X className="size-3.5" />
+                Cancelar
+              </button>
+            </>
+          )}
+
+          {appointment.status === "concluido" && (
+            <button
+              onClick={() => onSetStatus(appointment.id, "agendado")}
+              className="px-2.5 py-1.5 rounded-xl bg-[#1e222c] hover:bg-[#252b37] border border-[#2b303e] text-gray-300 hover:text-[#00f0ff] text-xs font-medium flex items-center gap-1 transition"
+              title="Reabrir horário como agendado"
+            >
+              <RotateCcw className="size-3" />
+              Reabrir
+            </button>
+          )}
+
+          {(appointment.status === "cancelado" || appointment.status === "faltou") && (
+            <button
+              onClick={() => onSetStatus(appointment.id, "agendado")}
+              className="px-2.5 py-1.5 rounded-xl bg-[#1e222c] hover:bg-[#252b37] border border-[#2b303e] text-[#00f0ff] text-xs font-medium flex items-center gap-1 transition"
+              title="Reativar agendamento"
+            >
+              <RotateCcw className="size-3" />
+              Reativar Horário
+            </button>
+          )}
+
+          {/* Delete Appointment Button */}
+          <button
+            onClick={() => onDelete(appointment)}
+            className="p-1.5 rounded-xl bg-[#1e222c] hover:bg-red-500/20 border border-[#2b303e] hover:border-red-500/30 text-gray-400 hover:text-red-400 transition"
+            title="Excluir agendamento"
+            aria-label="Excluir agendamento"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

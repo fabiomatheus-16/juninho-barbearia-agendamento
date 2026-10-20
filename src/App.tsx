@@ -3,7 +3,6 @@ import { useStore, actions, initCloudSync } from "./lib/store";
 import { BottomNav, type NavTab } from "./components/BottomNav";
 import { HomeView } from "./components/HomeView";
 import { BookingFlow } from "./components/BookingFlow";
-import { BarberPanel } from "./components/BarberPanel";
 import { AdminLogin } from "./components/AdminLogin";
 import { AdminPanel } from "./components/AdminPanel";
 
@@ -31,10 +30,12 @@ export default function App() {
     setCurrentTab("home");
   };
 
+  const isWideAdmin = currentTab === "admin" && adminAuth.isAuthenticated;
+
   return (
     <div className="min-h-screen bg-[#101115] text-[#f3f4f6]">
       {/* View routing based on active tab */}
-      <main className="mx-auto min-h-screen max-w-md pb-20">
+      <main className={`mx-auto min-h-screen pb-20 ${isWideAdmin ? "max-w-5xl px-3 sm:px-6" : "max-w-md"}`}>
         {currentTab === "home" && (
           <HomeView
             onGoToBooking={handleGoToBooking}
@@ -45,8 +46,6 @@ export default function App() {
         {currentTab === "booking" && (
           <BookingFlow onBackToHome={() => setCurrentTab("home")} />
         )}
-
-        {currentTab === "barber" && <BarberPanel />}
 
         {currentTab === "admin" && (
           <>
