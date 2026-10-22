@@ -19,6 +19,8 @@ import {
   todayISO,
   useStore,
   buildWhatsappLink,
+  normalizeDate,
+  normalizeTime,
 } from "../lib/store";
 import type { Appointment, Service, Status } from "../types";
 import { BrandLogo } from "./ui/BrandLogo";
@@ -63,11 +65,13 @@ export function BarberPanel() {
   const barber =
     barbers.find((b) => b.id === selectedBarberId) || barbers[0];
 
+  const normSelectedDate = normalizeDate(selectedDate);
+
   const filteredAppointments = appointments
     .filter(
-      (a) => a.barberId === selectedBarberId && a.date === selectedDate
+      (a) => a.barberId === selectedBarberId && normalizeDate(a.date) === normSelectedDate
     )
-    .sort((a, b) => a.time.localeCompare(b.time));
+    .sort((a, b) => normalizeTime(a.time).localeCompare(normalizeTime(b.time)));
 
   const getService = (serviceId: string) =>
     services.find((s) => s.id === serviceId);
@@ -85,12 +89,12 @@ export function BarberPanel() {
     totalRevenue * ((barber?.commission ?? 100) / 100);
 
   // Morning (before 12:00) & Afternoon (14:00+)
-  const morningList = filteredAppointments.filter((a) => a.time < "12:00");
-  const afternoonList = filteredAppointments.filter((a) => a.time >= "12:00");
+  const morningList = filteredAppointments.filter((a) => normalizeTime(a.time) < "12:00");
+  const afternoonList = filteredAppointments.filter((a) => normalizeTime(a.time) >= "12:00");
 
   const changeDay = (delta: number) => {
-    const [y, m, d] = selectedDate.split("-").map(Number);
-    const dateObj = new Date(y, m - 1, d);
+    const [y, m, d] = normSelectedDate.split("-").map(Number);
+    const dateObj = new Date(y, m - 1, d, 12, 0, 0);
     dateObj.setDate(dateObj.getDate() + delta);
     const ny = dateObj.getFullYear();
     const nm = String(dateObj.getMonth() + 1).padStart(2, "0");
@@ -98,7 +102,7 @@ export function BarberPanel() {
     setSelectedDate(`${ny}-${nm}-${nd}`);
   };
 
-  const isToday = selectedDate === todayISO();
+  const isToday = normSelectedDate === todayISO();
 
   return (
     <div className="min-h-screen pb-28 pt-4 px-4 sm:px-6 max-w-2xl mx-auto">

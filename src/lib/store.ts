@@ -10,7 +10,11 @@ import {
   deleteAppointmentFromCloud,
   fetchAppointmentsFromCloud,
   supabase,
+  normalizeDate,
+  normalizeTime,
 } from "./supabaseClient";
+
+export { normalizeDate, normalizeTime };
 
 export const SHOP: ShopInfo = {
   name: "Junin Barbeiro",
@@ -95,6 +99,7 @@ export const INITIAL_BARBERS: Barber[] = [
 
 export const todayISO = () => {
   const d = new Date();
+  d.setHours(12, 0, 0, 0); // Meio-dia evita desvios por fuso horário ou horário de verão
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -103,6 +108,7 @@ export const todayISO = () => {
 
 export const getRelativeDateISO = (offsetDays: number) => {
   const d = new Date();
+  d.setHours(12, 0, 0, 0); // Meio-dia evita desvios por fuso horário
   d.setDate(d.getDate() + offsetDays);
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
@@ -125,8 +131,10 @@ export const TIME_SLOTS: string[] = (() => {
 
 export function isOpenDate(dateStr: string): boolean {
   if (!dateStr) return false;
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const day = new Date(y, m - 1, d).getDay();
+  const normalized = normalizeDate(dateStr);
+  const [y, m, d] = normalized.split("-").map(Number);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return true;
+  const day = new Date(y, m - 1, d, 12, 0, 0).getDay();
   // 0 = Domingo (fechado)
   return day !== 0;
 }
@@ -134,7 +142,8 @@ export function isOpenDate(dateStr: string): boolean {
 export function isWithinOpeningHours(dateStr: string, timeStr: string, durationMin: number = 30): boolean {
   if (!isOpenDate(dateStr)) return false;
   if (!timeStr) return false;
-  const [h, m] = timeStr.split(":").map(Number);
+  const normTime = normalizeTime(timeStr);
+  const [h, m] = normTime.split(":").map(Number);
   if (isNaN(h) || isNaN(m)) return false;
   const start = h * 60 + m;
 
@@ -197,24 +206,27 @@ export function getNextAvailableBookingDate(now: Date = new Date()): string {
 
 
 /**
- * Funções auxiliares para apuração de períodos
+ * Funções auxiliares para apuração de períodos com segurança de fuso horário
  */
 export function isDateToday(dateStr: string): boolean {
-  return dateStr === todayISO();
+  if (!dateStr) return false;
+  return normalizeDate(dateStr) === todayISO();
 }
 
 export function isDateThisWeek(dateStr: string): boolean {
   if (!dateStr) return false;
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const target = new Date(y, m - 1, d);
-  target.setHours(0, 0, 0, 0);
+  const normalized = normalizeDate(dateStr);
+  const [y, m, d] = normalized.split("-").map(Number);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return false;
+  const target = new Date(y, m - 1, d, 12, 0, 0);
 
   const now = new Date();
-  now.setHours(0, 0, 0, 0);
+  now.setHours(12, 0, 0, 0);
   const currentDay = now.getDay();
   const diffToMonday = (currentDay === 0 ? -6 : 1) - currentDay;
   const monday = new Date(now);
   monday.setDate(now.getDate() + diffToMonday);
+  monday.setHours(0, 0, 0, 0);
 
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
@@ -225,7 +237,9 @@ export function isDateThisWeek(dateStr: string): boolean {
 
 export function isDateThisMonth(dateStr: string): boolean {
   if (!dateStr) return false;
-  const [y, m] = dateStr.split("-").map(Number);
+  const normalized = normalizeDate(dateStr);
+  const [y, m] = normalized.split("-").map(Number);
+  if (isNaN(y) || isNaN(m)) return false;
   const now = new Date();
   return y === now.getFullYear() && m === now.getMonth() + 1;
 }
@@ -276,9 +290,12 @@ function saveStored<T>(key: string, data: T) {
   }
 }
 
-// Conjunto inicial de agendamentos realistas cobrindo hoje, esta semana e este mês
+// Conjunto inicial de agendamentos realistas cobrindo hoje, amanhã, dia 24, próximos dias, esta semana e este mês
 function getInitialAppointments(): Appointment[] {
   const t = todayISO();
+  const dTomorrow = getRelativeDateISO(1); // amanhã
+  const d24 = getRelativeDateISO(2); // +2 dias (ex: dia 24)
+  const dPlus3 = getRelativeDateISO(3); // +3 dias
   const d1 = getRelativeDateISO(-1); // ontem
   const d2 = getRelativeDateISO(-2); // 2 dias atrás
   const d3 = getRelativeDateISO(-3); // 3 dias atrás
@@ -345,6 +362,88 @@ function getInitialAppointments(): Appointment[] {
       time: "16:00",
       clientName: "Matheus Oliveira",
       clientPhone: "84992345678",
+      status: "agendado",
+      createdAt: t,
+      tenantId: DEFAULT_TENANT_ID,
+    },
+
+    // --- AMANHÃ ---
+    {
+      id: "seed-tom-1",
+      serviceId: "svc-3", // Corte navalhado
+      barberId: "barber-1",
+      date: dTomorrow,
+      time: "10:00",
+      clientName: "Renan Cavalcanti",
+      clientPhone: "84994112233",
+      status: "agendado",
+      createdAt: t,
+      notes: "Horário reservado para amanhã",
+      tenantId: DEFAULT_TENANT_ID,
+    },
+    {
+      id: "seed-tom-2",
+      serviceId: "svc-1", // Nevou + corte
+      barberId: "barber-1",
+      date: dTomorrow,
+      time: "15:00",
+      clientName: "Igor Santana",
+      clientPhone: "84988223344",
+      status: "agendado",
+      createdAt: t,
+      notes: "Nevou + acabamento navalhado",
+      tenantId: DEFAULT_TENANT_ID,
+    },
+
+    // --- DIA 24 / FUTUROS (+2 DIAS) ---
+    {
+      id: "seed-d24-1",
+      serviceId: "svc-2", // Reflexo alinhado + corte
+      barberId: "barber-1",
+      date: d24,
+      time: "09:00",
+      clientName: "Danilo Albuquerque",
+      clientPhone: "84991334455",
+      status: "agendado",
+      createdAt: t,
+      notes: "Agendamento confirmado para o dia 24",
+      tenantId: DEFAULT_TENANT_ID,
+    },
+    {
+      id: "seed-d24-2",
+      serviceId: "svc-4", // Corte pigmentado
+      barberId: "barber-1",
+      date: d24,
+      time: "14:00",
+      clientName: "Leandro Vasconcelos",
+      clientPhone: "84987445566",
+      status: "agendado",
+      createdAt: t,
+      tenantId: DEFAULT_TENANT_ID,
+    },
+    {
+      id: "seed-d24-3",
+      serviceId: "svc-5", // Barba
+      barberId: "barber-1",
+      date: d24,
+      time: "16:00",
+      clientName: "Vinícius Paiva",
+      clientPhone: "84996556677",
+      status: "agendado",
+      createdAt: t,
+      notes: "Alinhamento com toalha morna",
+      tenantId: DEFAULT_TENANT_ID,
+    },
+
+    // --- +3 DIAS ---
+    {
+      id: "seed-dplus3-1",
+      serviceId: "svc-3", // Corte navalhado
+      barberId: "barber-1",
+      date: dPlus3,
+      time: "11:00",
+      clientName: "Guilherme Sampaio",
+      clientPhone: "84997788990",
       status: "agendado",
       createdAt: t,
       tenantId: DEFAULT_TENANT_ID,
@@ -640,22 +739,25 @@ export const actions = {
     if (!service) {
       throw new Error("Serviço não encontrado.");
     }
-    if (!data.date || !data.time) {
+    const normDate = normalizeDate(data.date);
+    const normTime = normalizeTime(data.time);
+
+    if (!normDate || !normTime) {
       throw new Error("Selecione uma data e horário válidos.");
     }
-    if (!isOpenDate(data.date)) {
+    if (!isOpenDate(normDate)) {
       throw new Error("A barbearia não abre aos domingos. Selecione outro dia.");
     }
-    if (data.date < todayISO()) {
+    if (normDate < todayISO()) {
       throw new Error("Não é possível realizar agendamentos para datas passadas.");
     }
-    if (isDayExpeditedPassed(data.date)) {
+    if (isDayExpeditedPassed(normDate)) {
       throw new Error("O expediente de hoje já foi encerrado (atendimentos até às 19h). Por favor, selecione outro dia.");
     }
-    if (isSlotInPast(data.date, data.time)) {
+    if (isSlotInPast(normDate, normTime)) {
       throw new Error("Este horário já encerrou para hoje. Por favor, selecione um horário futuro.");
     }
-    if (!isWithinOpeningHours(data.date, data.time, service.duration)) {
+    if (!isWithinOpeningHours(normDate, normTime, service.duration)) {
       throw new Error("Horário fora do funcionamento da barbearia (08h às 12h e 14h às 19h).");
     }
 
@@ -663,8 +765,8 @@ export const actions = {
     const collision = state.appointments.some(
       (a) =>
         a.barberId === data.barberId &&
-        a.date === data.date &&
-        a.time === data.time &&
+        normalizeDate(a.date) === normDate &&
+        normalizeTime(a.time) === normTime &&
         a.status !== "cancelado",
     );
     if (collision) {
@@ -673,6 +775,8 @@ export const actions = {
 
     const appt: Appointment = {
       ...data,
+      date: normDate,
+      time: normTime,
       id: `appt-${uid()}`,
       status: "agendado",
       createdAt: todayISO(),
@@ -710,6 +814,28 @@ export const actions = {
     });
 
     void deleteAppointmentFromCloud(id);
+  },
+
+  async refreshAppointments(): Promise<Appointment[]> {
+    const cloudAppts = await fetchAppointmentsFromCloud();
+    if (cloudAppts) {
+      update((s) => {
+        // Unifica agendamentos da nuvem com agendamentos locais sem perder nada
+        const cloudIds = new Set(cloudAppts.map((a) => a.id));
+        const merged = [
+          ...cloudAppts,
+          ...s.appointments.filter((a) => !cloudIds.has(a.id)),
+        ].sort((a, b) => {
+          const dComp = normalizeDate(a.date).localeCompare(normalizeDate(b.date));
+          if (dComp !== 0) return dComp;
+          return normalizeTime(a.time).localeCompare(normalizeTime(b.time));
+        });
+        saveStored(STORAGE_KEYS.APPOINTMENTS, merged);
+        return { ...s, appointments: merged };
+      });
+      return cloudAppts;
+    }
+    return state.appointments;
   },
 
   // Admin Authentication Actions
@@ -784,12 +910,21 @@ export async function initCloudSync() {
       });
     }
 
-    // 2. Tentar carregar agendamentos do Supabase
+    // 2. Tentar carregar agendamentos do Supabase (traz todas as datas sem cortes)
     const cloudAppts = await fetchAppointmentsFromCloud();
-    if (cloudAppts && cloudAppts.length > 0) {
+    if (cloudAppts) {
       update((s) => {
-        saveStored(STORAGE_KEYS.APPOINTMENTS, cloudAppts);
-        return { ...s, appointments: cloudAppts };
+        const cloudIds = new Set(cloudAppts.map((a) => a.id));
+        const merged = [
+          ...cloudAppts,
+          ...s.appointments.filter((a) => !cloudIds.has(a.id)),
+        ].sort((a, b) => {
+          const dComp = normalizeDate(a.date).localeCompare(normalizeDate(b.date));
+          if (dComp !== 0) return dComp;
+          return normalizeTime(a.time).localeCompare(normalizeTime(b.time));
+        });
+        saveStored(STORAGE_KEYS.APPOINTMENTS, merged);
+        return { ...s, appointments: merged };
       });
     }
 
@@ -811,8 +946,11 @@ export async function initCloudSync() {
         { event: "*", schema: "public", table: "appointments" },
         async () => {
           const fresh = await fetchAppointmentsFromCloud();
-          if (fresh && fresh.length > 0) {
-            update((s) => ({ ...s, appointments: fresh }));
+          if (fresh) {
+            update((s) => {
+              saveStored(STORAGE_KEYS.APPOINTMENTS, fresh);
+              return { ...s, appointments: fresh };
+            });
           }
         }
       )
@@ -845,8 +983,10 @@ export const formatTimeMinutes = (min: number): string => {
 
 export const formatDateBR = (isoDate: string): string => {
   if (!isoDate) return "";
-  const [y, m, d] = isoDate.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
+  const normalized = normalizeDate(isoDate);
+  const [y, m, d] = normalized.split("-").map(Number);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return normalized;
+  const date = new Date(y, m - 1, d, 12, 0, 0);
   return date.toLocaleDateString("pt-BR", {
     weekday: "long",
     day: "2-digit",
@@ -855,10 +995,11 @@ export const formatDateBR = (isoDate: string): string => {
 };
 
 export function takenSlots(appointments: Appointment[], barberId: string, date: string): Set<string> {
+  const normDate = normalizeDate(date);
   const filtered = appointments.filter(
-    (a) => a.barberId === barberId && a.date === date && a.status !== "cancelado",
+    (a) => a.barberId === barberId && normalizeDate(a.date) === normDate && a.status !== "cancelado",
   );
-  return new Set(filtered.map((a) => a.time));
+  return new Set(filtered.map((a) => normalizeTime(a.time)));
 }
 
 export function buildWhatsappLink(phoneDigits: string, message: string): string {

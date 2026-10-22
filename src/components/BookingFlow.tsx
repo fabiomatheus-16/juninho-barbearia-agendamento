@@ -165,7 +165,7 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
 
   const handleDateChange = (daysDelta: number) => {
     const [y, m, d] = selectedDate.split("-").map(Number);
-    const dateObj = new Date(y, m - 1, d);
+    const dateObj = new Date(y, m - 1, d, 12, 0, 0);
     dateObj.setDate(dateObj.getDate() + daysDelta);
 
     // Skip past dates

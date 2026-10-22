@@ -163,37 +163,100 @@ export async function deleteServiceFromCloud(serviceId: string): Promise<boolean
 }
 
 /**
- * Busca agendamentos em nuvem
+ * Normaliza qualquer formato de data (ISO com timestamp, DD/MM/YYYY, etc.)
+ * para o formato canônico universal YYYY-MM-DD sem distorção de fuso horário.
+ */
+export function normalizeDate(rawDate: unknown): string {
+  if (!rawDate) return "";
+  if (typeof rawDate === "string") {
+    const trimmed = rawDate.trim();
+    // 1. Padrão YYYY-MM-DD (ex: "2026-10-24", "2026-10-24T00:00:00Z", "2026-10-24 00:00:00")
+    const isoMatch = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (isoMatch) {
+      const year = isoMatch[1];
+      const month = isoMatch[2].padStart(2, "0");
+      const day = isoMatch[3].padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+    // 2. Padrão Brasileiro DD/MM/YYYY (ex: "24/10/2026", "24-10-2026")
+    const brMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+    if (brMatch) {
+      const day = brMatch[1].padStart(2, "0");
+      const month = brMatch[2].padStart(2, "0");
+      const year = brMatch[3];
+      return `${year}-${month}-${day}`;
+    }
+    // 3. Fallback para parse UTC
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      const year = parsed.getUTCFullYear();
+      const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(parsed.getUTCDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+  }
+  if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+    const year = rawDate.getFullYear();
+    const month = String(rawDate.getMonth() + 1).padStart(2, "0");
+    const day = String(rawDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+  return String(rawDate).slice(0, 10);
+}
+
+/**
+ * Normaliza horários para o formato HH:MM (ex: "09:00:00" -> "09:00")
+ */
+export function normalizeTime(rawTime: unknown): string {
+  if (!rawTime) return "09:00";
+  const str = String(rawTime).trim();
+  const match = str.match(/^(\d{1,2}):(\d{2})/);
+  if (match) {
+    const hh = match[1].padStart(2, "0");
+    const mm = match[2];
+    return `${hh}:${mm}`;
+  }
+  return str.slice(0, 5);
+}
+
+/**
+ * Busca todos os agendamentos em nuvem sem filtros de corte de data
  */
 export async function fetchAppointmentsFromCloud(): Promise<Appointment[] | null> {
   try {
     const { data, error } = await supabase
       .from("appointments")
       .select("*")
-      .order("created_at", { ascending: false });
+      .order("date", { ascending: true })
+      .order("time", { ascending: true });
 
-    if (error || !data) return null;
+    if (error) {
+      console.warn("Supabase fetch appointments error:", error.message);
+      return null;
+    }
+    if (!data) return null;
 
     return data.map((row) => ({
       id: String(row.id),
       serviceId: String(row.service_id),
       barberId: String(row.barber_id || "barber-1"),
-      date: row.date,
-      time: row.time,
-      clientName: row.client_name,
-      clientPhone: row.client_phone,
+      date: normalizeDate(row.date),
+      time: normalizeTime(row.time),
+      clientName: row.client_name || "Cliente",
+      clientPhone: row.client_phone || "",
       status: (row.status || "agendado") as Status,
       notes: row.notes || "",
-      createdAt: row.created_at || row.date,
+      createdAt: normalizeDate(row.created_at || row.date),
       tenantId: row.tenant_id,
     }));
-  } catch {
+  } catch (err) {
+    console.warn("fetchAppointmentsFromCloud caught error:", err);
     return null;
   }
 }
 
 /**
- * Salva agendamento no Supabase em nuvem
+ * Salva agendamento no Supabase em nuvem garantindo formato seguro de data e hora
  */
 export async function saveAppointmentToCloud(appointment: Appointment): Promise<string | null> {
   try {
@@ -201,8 +264,8 @@ export async function saveAppointmentToCloud(appointment: Appointment): Promise<
       id: appointment.id,
       service_id: appointment.serviceId,
       barber_id: appointment.barberId,
-      date: appointment.date,
-      time: appointment.time,
+      date: normalizeDate(appointment.date),
+      time: normalizeTime(appointment.time),
       client_name: appointment.clientName,
       client_phone: appointment.clientPhone,
       status: appointment.status,

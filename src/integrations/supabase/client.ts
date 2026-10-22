@@ -9,4 +9,6 @@ export {
   fetchAppointmentsFromCloud,
   saveAppointmentToCloud,
   updateAppointmentStatusInCloud,
+  normalizeDate,
+  normalizeTime,
 } from "../../lib/supabaseClient";

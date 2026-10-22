@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Plus,
   Pencil,
@@ -46,9 +46,12 @@ import {
   SHOP,
   useStore,
   todayISO,
+  getRelativeDateISO,
   buildWhatsappLink,
   TIME_SLOTS,
   isOpenDate,
+  normalizeDate,
+  normalizeTime,
 } from "../lib/store";
 import {
   DEFAULT_TENANT_ID,
@@ -109,10 +112,11 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
 
   // Filtros da Agenda / Agendamentos
   const [selectedDate, setSelectedDate] = useState<string>(todayISO());
-  const [dateFilterMode, setDateFilterMode] = useState<"day" | "all">("day");
+  const [dateFilterMode, setDateFilterMode] = useState<"day" | "future" | "all">("future");
   const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
   const [barberFilter, setBarberFilter] = useState<string>("all");
   const [appointmentSearch, setAppointmentSearch] = useState<string>("");
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
 
   // Modal de Exclusão de Agendamento
   const [deletingAppointment, setDeletingAppointment] = useState<Appointment | null>(null);
@@ -173,6 +177,19 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
   // Financial calculations
   const financial = calculateFinancialSummary(appointments, services, rankingPeriod);
 
+  // Sincronização manual com a nuvem do Supabase
+  const handleRefreshSupabase = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const fresh = await actions.refreshAppointments();
+      showToast(`Sincronizado! ${fresh.length} agendamento(s) carregados da nuvem.`);
+    } catch {
+      showToast("Aviso: Falha temporária ao sincronizar com o Supabase.");
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
   // Handlers da Agenda / Agendamentos
   const handleSetAppointmentStatus = (id: string, newStatus: Status) => {
     actions.setAppointmentStatus(id, newStatus);
@@ -196,8 +213,10 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
   };
 
   const changeDay = (delta: number) => {
-    const [y, m, d] = selectedDate.split("-").map(Number);
-    const dateObj = new Date(y, m - 1, d);
+    const normalized = normalizeDate(selectedDate) || todayISO();
+    const [y, m, d] = normalized.split("-").map(Number);
+    // Meio-dia (12:00) evita qualquer salto involuntário de data por fuso horário ou horário de verão
+    const dateObj = new Date(y, m - 1, d, 12, 0, 0);
     dateObj.setDate(dateObj.getDate() + delta);
     const ny = dateObj.getFullYear();
     const nm = String(dateObj.getMonth() + 1).padStart(2, "0");
@@ -218,8 +237,8 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
       actions.addAppointment({
         serviceId: svcId,
         barberId: newApptBarberId || barbers[0]?.id || "barber-1",
-        date: newApptDate,
-        time: newApptTime,
+        date: normalizeDate(newApptDate),
+        time: normalizeTime(newApptTime),
         clientName: newApptClientName.trim(),
         clientPhone: newApptClientPhone.trim(),
         notes: newApptNotes.trim() || undefined,
@@ -234,15 +253,87 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
     }
   };
 
+  // Mapeia todas as datas que possuem agendamentos no banco
+  const datesWithApptsMap = useMemo(() => {
+    const map = new Map<string, number>();
+    appointments.forEach((a) => {
+      const d = normalizeDate(a.date);
+      if (d) {
+        map.set(d, (map.get(d) || 0) + 1);
+      }
+    });
+    return map;
+  }, [appointments]);
+
+  // Lista dos próximos dias para navegação rápida com pílulas interativas
+  const upcomingPills = useMemo(() => {
+    const pills: { date: string; label: string; count: number; isToday?: boolean; isSunday?: boolean }[] = [];
+    const addedDates = new Set<string>();
+
+    for (let offset = 0; offset <= 10; offset++) {
+      const d = getRelativeDateISO(offset);
+      addedDates.add(d);
+      const isToday = offset === 0;
+      const isTomorrow = offset === 1;
+      const count = datesWithApptsMap.get(d) || 0;
+      const isSunday = !isOpenDate(d);
+
+      let label = formatDateBR(d);
+      const parts = d.split("-");
+      const shortDate = `${parts[2]}/${parts[1]}`;
+
+      if (isToday) {
+        label = `Hoje (${shortDate})`;
+      } else if (isTomorrow) {
+        label = `Amanhã (${shortDate})`;
+      } else {
+        const [y, m, day] = d.split("-").map(Number);
+        const dayOfWeekShort = new Date(y, m - 1, day, 12, 0, 0).toLocaleDateString("pt-BR", { weekday: "short" });
+        label = `${dayOfWeekShort.replace(".", "")}, ${shortDate}`;
+      }
+
+      pills.push({ date: d, label, count, isToday, isSunday });
+    }
+
+    // Adiciona quaisquer outras datas futuras que já tenham agendamentos gravados
+    const today = todayISO();
+    Array.from(datesWithApptsMap.keys())
+      .filter((d) => d >= today && !addedDates.has(d))
+      .sort()
+      .forEach((d) => {
+        const count = datesWithApptsMap.get(d) || 0;
+        const [y, m, day] = d.split("-").map(Number);
+        const dayOfWeekShort = new Date(y, m - 1, day, 12, 0, 0).toLocaleDateString("pt-BR", { weekday: "short" });
+        const parts = d.split("-");
+        const shortDate = `${parts[2]}/${parts[1]}`;
+        pills.push({
+          date: d,
+          label: `${dayOfWeekShort.replace(".", "")}, ${shortDate}`,
+          count,
+          isSunday: !isOpenDate(d),
+        });
+      });
+
+    return pills;
+  }, [datesWithApptsMap]);
+
   // Estatísticas e filtros da Agenda
   const todayDate = todayISO();
-  const isSelectedDateToday = selectedDate === todayDate;
-  const todayAppointments = appointments.filter((a) => a.date === todayDate);
+  const normalizedSelectedDate = normalizeDate(selectedDate);
+  const isSelectedDateToday = normalizedSelectedDate === todayDate;
+
+  const todayAppointments = appointments.filter((a) => normalizeDate(a.date) === todayDate);
   const todayPendingCount = todayAppointments.filter((a) => a.status === "agendado").length;
+  const futureAppointments = appointments.filter((a) => normalizeDate(a.date) >= todayDate);
+  const futureCount = futureAppointments.length;
 
   const filteredAppointments = appointments
     .filter((appt) => {
-      if (dateFilterMode === "day" && appt.date !== selectedDate) {
+      const apptDate = normalizeDate(appt.date);
+      if (dateFilterMode === "day" && apptDate !== normalizedSelectedDate) {
+        return false;
+      }
+      if (dateFilterMode === "future" && apptDate < todayDate) {
         return false;
       }
       if (barberFilter !== "all" && appt.barberId !== barberFilter) {
@@ -252,19 +343,22 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
         return false;
       }
       if (appointmentSearch.trim()) {
-        const q = appointmentSearch.toLowerCase();
+        const q = appointmentSearch.toLowerCase().trim();
         const matchName = appt.clientName.toLowerCase().includes(q);
         const matchPhone = appt.clientPhone.toLowerCase().includes(q);
         const matchNotes = appt.notes?.toLowerCase().includes(q) ?? false;
         const svc = services.find((s) => s.id === appt.serviceId);
         const matchSvc = svc?.name.toLowerCase().includes(q) ?? false;
-        if (!matchName && !matchPhone && !matchNotes && !matchSvc) return false;
+        const matchDate = apptDate.includes(q) || formatDateBR(apptDate).toLowerCase().includes(q);
+        if (!matchName && !matchPhone && !matchNotes && !matchSvc && !matchDate) return false;
       }
       return true;
     })
     .sort((a, b) => {
-      if (a.date !== b.date) return a.date.localeCompare(b.date);
-      return a.time.localeCompare(b.time);
+      const dateA = normalizeDate(a.date);
+      const dateB = normalizeDate(b.date);
+      if (dateA !== dateB) return dateA.localeCompare(dateB);
+      return normalizeTime(a.time).localeCompare(normalizeTime(b.time));
     });
 
   const getService = (serviceId: string) => services.find((s) => s.id === serviceId);
@@ -497,7 +591,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
       {/* TAB 0: AGENDA & AGENDAMENTOS (INTEGRADA DO ADMIN) */}
       {activeTab === "appointments" && (
         <div className="space-y-6 animate-in fade-in">
-          {/* Top Bar: Title & Quick Add */}
+          {/* Top Bar: Title, Cloud Sync & Quick Add */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
@@ -510,27 +604,40 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
                 </span>
               </div>
               <p className="text-xs text-gray-400 mt-0.5">
-                Controle de presença, confirmações via WhatsApp e gestão em tempo real
+                Controle em tempo real, confirmações via WhatsApp e gestão de datas sem cortes
               </p>
             </div>
 
-            <button
-              onClick={() => {
-                const activeSvcs = services.filter((s) => s.active !== false);
-                setNewApptServiceId(activeSvcs[0]?.id || services[0]?.id || "");
-                setNewApptBarberId(barbers[0]?.id || "barber-1");
-                setNewApptDate(selectedDate || todayISO());
-                setNewApptTime("09:00");
-                setNewApptClientName("");
-                setNewApptClientPhone("");
-                setNewApptNotes("");
-                setIsAddApptModalOpen(true);
-              }}
-              className="h-10 px-4 rounded-xl bg-gradient-to-r from-[#00f0ff] to-[#0099ff] text-[#090a0f] font-bold text-xs sm:text-sm shadow-[0_0_20px_rgba(0,240,255,0.35)] hover:brightness-110 transition active:scale-95 flex items-center justify-center gap-1.5 shrink-0 self-start sm:self-auto"
-            >
-              <Plus className="size-4 stroke-[3]" />
-              Novo Agendamento
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleRefreshSupabase}
+                disabled={isSyncingCloud}
+                className="h-10 px-3.5 rounded-xl bg-[#1e222c] hover:bg-[#272d3a] border border-[#2b303e] text-gray-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 disabled:opacity-60"
+                title="Buscar agendamentos mais recentes salvos no Supabase"
+              >
+                <RefreshCw className={`size-3.5 text-[#00f0ff] ${isSyncingCloud ? "animate-spin" : ""}`} />
+                <span>{isSyncingCloud ? "Sincronizando..." : "Sincronizar Supabase"}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const activeSvcs = services.filter((s) => s.active !== false);
+                  setNewApptServiceId(activeSvcs[0]?.id || services[0]?.id || "");
+                  setNewApptBarberId(barbers[0]?.id || "barber-1");
+                  setNewApptDate(selectedDate || todayISO());
+                  setNewApptTime("09:00");
+                  setNewApptClientName("");
+                  setNewApptClientPhone("");
+                  setNewApptNotes("");
+                  setIsAddApptModalOpen(true);
+                }}
+                className="h-10 px-4 rounded-xl bg-gradient-to-r from-[#00f0ff] to-[#0099ff] text-[#090a0f] font-bold text-xs sm:text-sm shadow-[0_0_20px_rgba(0,240,255,0.35)] hover:brightness-110 transition active:scale-95 flex items-center justify-center gap-1.5 shrink-0"
+              >
+                <Plus className="size-4 stroke-[3]" />
+                Novo Agendamento
+              </button>
+            </div>
           </div>
 
           {/* Quick Metrics Cards */}
@@ -541,7 +648,9 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
                   ? isSelectedDateToday
                     ? "Hoje na Barbearia"
                     : `Dia ${selectedDate.split("-").reverse().slice(0, 2).join("/")}`
-                  : "Total Filtrado"}
+                  : dateFilterMode === "future"
+                  ? "Agendamentos Futuros"
+                  : "Total Geral"}
               </span>
               <p className="font-display text-2xl font-bold text-white mt-1">
                 {filteredAppointments.length}
@@ -577,26 +686,79 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
 
             <div className="p-4 rounded-2xl bg-[#161820] border border-[#272a34]">
               <span className="text-[11px] font-medium text-gray-400 block">
-                Total Geral no Supabase
+                Total no Supabase
               </span>
               <p className="font-display text-2xl font-bold text-[#00f0ff] mt-1">
                 {appointments.length}
               </p>
               <span className="text-[11px] text-gray-400">
-                Registros sincronizados
+                {futureCount} futuros a partir de hoje
               </span>
             </div>
           </div>
 
           {/* Date Navigator & Filter Controls */}
-          <div className="p-4 rounded-2xl bg-[#161820] border border-[#272a34] space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              {/* Stepper buttons & date display */}
+          <div className="p-4 rounded-2xl bg-[#161820] border border-[#272a34] space-y-3.5">
+            {/* Quick Date Pills Horizontal Scrollbar */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <CalendarDays className="size-3.5 text-[#00f0ff]" />
+                  Navegação Rápida por Datas:
+                </span>
+                <span className="text-[10px] text-gray-500">
+                  Toque para ver a agenda do dia
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                {upcomingPills.map((pill) => {
+                  const isSelected = dateFilterMode === "day" && normalizedSelectedDate === pill.date;
+                  return (
+                    <button
+                      key={pill.date}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDate(pill.date);
+                        setDateFilterMode("day");
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 shrink-0 ${
+                        isSelected
+                          ? "bg-[#00f0ff] text-[#090a0f] font-bold shadow-[0_0_12px_rgba(0,240,255,0.35)] scale-[1.02]"
+                          : pill.count > 0
+                          ? "bg-[#18232e] text-[#00f0ff] border border-[#00f0ff]/30 hover:bg-[#1f2f3e]"
+                          : pill.isSunday
+                          ? "bg-[#14151b] text-gray-500 border border-[#20222a] hover:bg-[#191b22]"
+                          : "bg-[#161820] text-gray-300 border border-[#272a34] hover:bg-[#1f232e] hover:text-white"
+                      }`}
+                    >
+                      <span>{pill.label}</span>
+                      {pill.count > 0 && (
+                        <span
+                          className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                            isSelected
+                              ? "bg-[#090a0f] text-[#00f0ff]"
+                              : "bg-[#00f0ff]/20 text-[#00f0ff] border border-[#00f0ff]/40"
+                          }`}
+                        >
+                          {pill.count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Stepper buttons, date display, and mode switcher */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-2 border-t border-[#22252e]">
+              {/* Stepper and active day indicator */}
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => changeDay(-1)}
                   className="p-2 rounded-xl bg-[#1e222c] hover:bg-[#272d3a] text-gray-300 hover:text-white transition"
                   aria-label="Dia anterior"
+                  title="Dia anterior"
                 >
                   <ChevronLeft className="size-4" />
                 </button>
@@ -608,7 +770,9 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
                       ? isSelectedDateToday
                         ? `Hoje (${formatDateBR(selectedDate)})`
                         : formatDateBR(selectedDate)
-                      : "Todos os dias cadastrados"}
+                      : dateFilterMode === "future"
+                      ? `Próximos / Futuros (A partir de Hoje • ${futureCount})`
+                      : `Histórico Completo (${appointments.length})`}
                   </span>
                 </div>
 
@@ -616,12 +780,13 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
                   onClick={() => changeDay(1)}
                   className="p-2 rounded-xl bg-[#1e222c] hover:bg-[#272d3a] text-gray-300 hover:text-white transition"
                   aria-label="Próximo dia"
+                  title="Próximo dia"
                 >
                   <ChevronRight className="size-4" />
                 </button>
               </div>
 
-              {/* Date Mode Toggles */}
+              {/* View Mode Switcher and Native Date Picker */}
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   onClick={() => {
@@ -637,28 +802,51 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
                   Hoje
                 </button>
 
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      setSelectedDate(e.target.value);
-                      setDateFilterMode("day");
-                    }
-                  }}
-                  className="h-8 rounded-xl bg-[#1e222c] border border-[#2b303e] px-2.5 text-xs text-white focus:outline-none focus:border-[#00f0ff]"
-                />
+                <button
+                  onClick={() => setDateFilterMode("future")}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1 ${
+                    dateFilterMode === "future"
+                      ? "bg-[#00f0ff] text-[#090a0f] font-bold shadow-[0_0_10px_rgba(0,240,255,0.3)]"
+                      : "bg-[#1e222c] text-gray-300 hover:text-white hover:bg-[#252b37]"
+                  }`}
+                  title="Ver todos os agendamentos a partir de hoje (incluindo amanhã, dia 24 e seguintes)"
+                >
+                  <span>Próximos / Futuros</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      dateFilterMode === "future"
+                        ? "bg-[#090a0f] text-[#00f0ff]"
+                        : "bg-[#2b303e] text-gray-300"
+                    }`}
+                  >
+                    {futureCount}
+                  </span>
+                </button>
 
                 <button
-                  onClick={() => setDateFilterMode(dateFilterMode === "all" ? "day" : "all")}
+                  onClick={() => setDateFilterMode("all")}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
                     dateFilterMode === "all"
                       ? "bg-[#00f0ff] text-[#090a0f] font-bold shadow-[0_0_10px_rgba(0,240,255,0.3)]"
                       : "bg-[#1e222c] text-gray-300 hover:text-white hover:bg-[#252b37]"
                   }`}
+                  title="Ver histórico geral de todos os agendamentos"
                 >
-                  Ver Todos
+                  Histórico Geral
                 </button>
+
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      setSelectedDate(normalizeDate(e.target.value));
+                      setDateFilterMode("day");
+                    }
+                  }}
+                  className="h-8 rounded-xl bg-[#1e222c] border border-[#2b303e] px-2.5 text-xs text-white focus:outline-none focus:border-[#00f0ff]"
+                  title="Selecionar data específica no calendário"
+                />
               </div>
             </div>
 
@@ -669,7 +857,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
                 <Search className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Buscar cliente, tel ou serviço..."
+                  placeholder="Buscar cliente, tel, serviço ou data (ex: 24)..."
                   value={appointmentSearch}
                   onChange={(e) => setAppointmentSearch(e.target.value)}
                   className="w-full h-9 rounded-xl bg-[#12141a] border border-[#272a34] pl-9 pr-3 text-xs text-white focus:outline-none focus:border-[#00f0ff]"
@@ -738,7 +926,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
 
                 {morningList.length === 0 ? (
                   <div className="p-6 rounded-2xl bg-[#14161c] border border-[#22252e] text-center text-xs text-gray-500">
-                    Nenhum agendamento na manhã para este dia.
+                    Nenhum agendamento na manhã para este dia ({formatDateBR(selectedDate)}).
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -772,7 +960,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
 
                 {afternoonList.length === 0 ? (
                   <div className="p-6 rounded-2xl bg-[#14161c] border border-[#22252e] text-center text-xs text-gray-500">
-                    Nenhum agendamento na tarde para este dia.
+                    Nenhum agendamento na tarde para este dia ({formatDateBR(selectedDate)}).
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -789,19 +977,72 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
                   </div>
                 )}
               </div>
+
+              {filteredAppointments.length === 0 && (
+                <div className="p-8 rounded-2xl bg-[#14161c] border border-[#22252e] text-center space-y-3">
+                  <p className="text-xs text-gray-400">
+                    Não há agendamentos para o dia {formatDateBR(selectedDate)}.
+                  </p>
+                  <div className="flex items-center justify-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setDateFilterMode("future")}
+                      className="px-4 py-2 rounded-xl bg-[#00f0ff] text-[#090a0f] font-bold text-xs shadow-[0_0_12px_rgba(0,240,255,0.3)] hover:brightness-110 transition"
+                    >
+                      Ver Todos os Agendamentos Futuros ({futureCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const activeSvcs = services.filter((s) => s.active !== false);
+                        setNewApptServiceId(activeSvcs[0]?.id || services[0]?.id || "");
+                        setNewApptBarberId(barbers[0]?.id || "barber-1");
+                        setNewApptDate(selectedDate);
+                        setNewApptTime("09:00");
+                        setNewApptClientName("");
+                        setNewApptClientPhone("");
+                        setNewApptNotes("");
+                        setIsAddApptModalOpen(true);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-[#1e222c] hover:bg-[#272d3a] border border-[#2b303e] text-gray-300 hover:text-white text-xs font-semibold transition"
+                    >
+                      Agendar Cliente neste Dia
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
-            /* Modo "Todos os Dias" */
+            /* Modo "Próximos / Futuros" ou "Histórico Completo" */
             <div className="space-y-3">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                  Listagem Geral de Agendamentos ({filteredAppointments.length})
+                  {dateFilterMode === "future"
+                    ? `Agendamentos Futuros a Partir de Hoje (${filteredAppointments.length})`
+                    : `Histórico Geral de Agendamentos (${filteredAppointments.length})`}
+                </span>
+                <span className="text-[11px] text-gray-500">
+                  Ordenados por data e horário
                 </span>
               </div>
 
               {filteredAppointments.length === 0 ? (
-                <div className="p-8 rounded-2xl bg-[#14161c] border border-[#22252e] text-center text-xs text-gray-500">
-                  Nenhum agendamento encontrado com os filtros selecionados.
+                <div className="p-8 rounded-2xl bg-[#14161c] border border-[#22252e] text-center space-y-3">
+                  <p className="text-xs text-gray-400">
+                    Nenhum agendamento encontrado com os filtros selecionados.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatusFilter("all");
+                      setBarberFilter("all");
+                      setAppointmentSearch("");
+                      setDateFilterMode("future");
+                    }}
+                    className="px-4 py-2 rounded-xl bg-[#1e222c] hover:bg-[#272d3a] text-[#00f0ff] text-xs font-semibold transition"
+                  >
+                    Limpar Filtros de Busca
+                  </button>
                 </div>
               ) : (
                 filteredAppointments.map((appt) => (
