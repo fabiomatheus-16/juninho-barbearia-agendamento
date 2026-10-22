@@ -26,6 +26,11 @@ import {
   formatTimeMinutes,
   isOpenDate,
   isWithinOpeningHours,
+  isSlotInPast,
+  isDayExpeditedPassed,
+  getNextAvailableBookingDate,
+  isDateToday,
+  getRelativeDateISO,
   SHOP,
   takenSlots,
   TIME_SLOTS,
@@ -54,7 +59,9 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
   const [selectedBarberId, setSelectedBarberId] = useState<string>(
     barbers[0]?.id || ""
   );
-  const [selectedDate, setSelectedDate] = useState<string>(todayISO());
+  const [selectedDate, setSelectedDate] = useState<string>(() =>
+    getNextAvailableBookingDate()
+  );
   const [selectedTime, setSelectedTime] = useState<string>("");
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
@@ -80,7 +87,12 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
       case 1:
         return Boolean(selectedBarberId);
       case 2:
-        return Boolean(selectedTime && isOpenDate(selectedDate));
+        return Boolean(
+          selectedTime &&
+          isOpenDate(selectedDate) &&
+          !isSlotInPast(selectedDate, selectedTime) &&
+          !isDayExpeditedPassed(selectedDate)
+        );
       case 3:
         return (
           clientName.trim().length >= 2 &&
@@ -108,6 +120,30 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
 
     // Submit booking
     if (!selectedService || !selectedBarber || !selectedTime) return;
+
+    if (!isOpenDate(selectedDate)) {
+      setBookingError("A barbearia não abre aos domingos. Selecione outro dia.");
+      return;
+    }
+
+    if (selectedDate < todayISO()) {
+      setBookingError("Não é possível realizar agendamentos para datas passadas.");
+      return;
+    }
+
+    if (isDayExpeditedPassed(selectedDate)) {
+      setBookingError(
+        "O expediente de hoje já foi encerrado (atendimentos até às 19h). Por favor, selecione outro dia."
+      );
+      return;
+    }
+
+    if (isSlotInPast(selectedDate, selectedTime)) {
+      setBookingError(
+        "O horário selecionado já encerrou para hoje. Por favor, selecione um horário futuro."
+      );
+      return;
+    }
 
     try {
       const appt = actions.addAppointment({
@@ -521,12 +557,69 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
             </p>
           </div>
 
+          {/* Quick Date Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+            {[
+              { label: "Hoje", date: todayISO(), isToday: true },
+              { label: "Amanhã", date: getRelativeDateISO(1) },
+              { label: "Depois de Amanhã", date: getRelativeDateISO(2) },
+              { label: "+3 Dias", date: getRelativeDateISO(3) },
+            ].map((pill) => {
+              const isSelected = selectedDate === pill.date;
+              const isSunday = !isOpenDate(pill.date);
+              const isTodayClosed = pill.isToday && isDayExpeditedPassed(pill.date);
+
+              return (
+                <button
+                  key={pill.date}
+                  type="button"
+                  onClick={() => {
+                    setSelectedDate(pill.date);
+                    setSelectedTime("");
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 ${
+                    isSelected
+                      ? "bg-[#00f0ff] text-[#090a0f] font-bold shadow-[0_0_12px_rgba(0,240,255,0.3)]"
+                      : isTodayClosed
+                      ? "bg-[#181a22] text-amber-400/80 border border-amber-500/30 hover:bg-[#1f222c]"
+                      : isSunday
+                      ? "bg-[#14151c] text-gray-500 border border-[#20232d] hover:bg-[#1a1d26]"
+                      : "bg-[#161820] text-gray-300 border border-[#272a34] hover:bg-[#1f232e] hover:text-white"
+                  }`}
+                >
+                  <span>{pill.label}</span>
+                  {isTodayClosed && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      Encerrado
+                    </span>
+                  )}
+                  {isSunday && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
+                      Fechado
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Date Selector */}
           <div className="p-3.5 rounded-2xl bg-[#161820] border border-[#272a34]">
             <div className="flex items-center justify-between">
               <button
+                type="button"
+                disabled={selectedDate <= todayISO()}
                 onClick={() => handleDateChange(-1)}
-                className="p-2 rounded-xl bg-[#1e222c] hover:bg-[#282f3d] text-gray-300 hover:text-white transition"
+                className={`p-2 rounded-xl text-gray-300 transition ${
+                  selectedDate <= todayISO()
+                    ? "opacity-30 cursor-not-allowed bg-transparent"
+                    : "bg-[#1e222c] hover:bg-[#282f3d] hover:text-white"
+                }`}
+                title={
+                  selectedDate <= todayISO()
+                    ? "Não é possível selecionar datas passadas"
+                    : "Dia anterior"
+                }
               >
                 <ChevronLeft className="size-4" />
               </button>
@@ -534,6 +627,7 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
               <div className="text-center">
                 <span className="text-xs font-bold text-[#00f0ff] block">
                   {formatDateBR(selectedDate)}
+                  {isDateToday(selectedDate) && " (Hoje)"}
                 </span>
                 <span className="text-[11px] text-gray-400 font-mono">
                   {selectedDate.split("-").reverse().join("/")}
@@ -541,29 +635,67 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
               </div>
 
               <button
+                type="button"
                 onClick={() => handleDateChange(1)}
                 className="p-2 rounded-xl bg-[#1e222c] hover:bg-[#282f3d] text-gray-300 hover:text-white transition"
+                title="Próximo dia"
               >
                 <ChevronRight className="size-4" />
               </button>
             </div>
 
             {!isOpenDate(selectedDate) && (
-              <div className="mt-3 p-2.5 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs text-center">
-                🚫 A barbearia não abre aos domingos. Escolha outro dia.
+              <div className="mt-3 p-2.5 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs text-center flex items-center justify-center gap-1.5">
+                <AlertCircle className="size-4 shrink-0 text-red-400" />
+                <span>A barbearia não abre aos domingos. Selecione outro dia.</span>
               </div>
             )}
           </div>
 
-          {/* Time Slots Grid */}
-          {isOpenDate(selectedDate) && (
+          {/* Expediente de hoje já encerrado */}
+          {isOpenDate(selectedDate) &&
+            isDateToday(selectedDate) &&
+            isDayExpeditedPassed(selectedDate) && (
+              <div className="p-5 rounded-2xl bg-[#171a24] border border-amber-500/30 text-center space-y-3 animate-in fade-in">
+                <div className="size-12 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center justify-center mx-auto shadow-[0_0_20px_rgba(245,158,11,0.2)]">
+                  <Clock className="size-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white font-display">
+                    Expediente de Hoje Encerrado
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
+                    O horário de funcionamento para hoje encerrou (último atendimento às 18h). Escolha o próximo dia útil disponível para garantir sua vaga.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextDate = getNextAvailableBookingDate();
+                    setSelectedDate(nextDate);
+                    setSelectedTime("");
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#00f0ff] to-[#0099ff] text-[#090a0f] font-bold text-xs shadow-[0_0_15px_rgba(0,240,255,0.4)] hover:brightness-110 transition active:scale-95"
+                >
+                  <Calendar className="size-4" />
+                  <span>
+                    Agendar para {formatDateBR(getNextAvailableBookingDate())}
+                  </span>
+                </button>
+              </div>
+            )}
+
+          {/* Time Slots Grid (only if open date and day is not fully passed) */}
+          {isOpenDate(selectedDate) && !isDayExpeditedPassed(selectedDate) && (
             <div className="space-y-4">
               <div>
                 <span className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
                   Horários Disponíveis (Intervalos de 1h • Almoço: 12h–14h)
                 </span>
                 <p className="text-[11px] text-gray-500">
-                  Toque no horário desejado para prosseguir com seu agendamento:
+                  {isDateToday(selectedDate)
+                    ? "Horários passados do dia já estão bloqueados automaticamente."
+                    : "Toque no horário desejado para prosseguir com seu agendamento:"}
                 </p>
               </div>
 
@@ -582,28 +714,44 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
                 <div className="grid grid-cols-4 gap-2">
                   {TIME_SLOTS.filter((t) => t < "12:00").map((timeSlot) => {
                     const isTaken = taken.has(timeSlot);
+                    const isPast = isSlotInPast(selectedDate, timeSlot);
                     const isSelected = selectedTime === timeSlot;
                     const isValidHour = isWithinOpeningHours(
                       selectedDate,
                       timeSlot,
                       selectedService?.duration || 30
                     );
-                    const disabled = isTaken || !isValidHour;
+                    const disabled = isTaken || !isValidHour || isPast;
 
                     return (
                       <button
                         key={timeSlot}
+                        type="button"
                         disabled={disabled}
                         onClick={() => setSelectedTime(timeSlot)}
-                        className={`h-11 rounded-xl text-xs font-bold font-mono transition relative ${
+                        title={
+                          isPast
+                            ? "Horário já encerrado para hoje"
+                            : isTaken
+                            ? "Horário já reservado"
+                            : timeSlot
+                        }
+                        className={`h-12 rounded-xl text-xs font-bold font-mono transition relative flex flex-col items-center justify-center ${
                           isSelected
                             ? "bg-[#00f0ff] text-[#090a0f] shadow-[0_0_15px_rgba(0,240,255,0.4)] scale-105"
-                            : disabled
+                            : isPast
+                            ? "bg-[#111319] text-gray-600 border border-[#1b1e26] cursor-not-allowed opacity-50"
+                            : isTaken
                             ? "bg-[#14151a] text-gray-600 border border-[#1e2129] cursor-not-allowed line-through"
                             : "bg-[#1c202a] text-gray-300 border border-[#2b303e] hover:border-[#00f0ff] hover:text-white"
                         }`}
                       >
-                        {timeSlot}
+                        <span>{timeSlot}</span>
+                        {isPast && (
+                          <span className="text-[8px] font-sans font-normal text-gray-500 leading-none">
+                            Encerrado
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -625,42 +773,63 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                   {TIME_SLOTS.filter((t) => t >= "12:00").map((timeSlot) => {
                     const isTaken = taken.has(timeSlot);
+                    const isPast = isSlotInPast(selectedDate, timeSlot);
                     const isSelected = selectedTime === timeSlot;
                     const isValidHour = isWithinOpeningHours(
                       selectedDate,
                       timeSlot,
                       selectedService?.duration || 30
                     );
-                    const disabled = isTaken || !isValidHour;
+                    const disabled = isTaken || !isValidHour || isPast;
 
                     return (
                       <button
                         key={timeSlot}
+                        type="button"
                         disabled={disabled}
                         onClick={() => setSelectedTime(timeSlot)}
-                        className={`h-11 rounded-xl text-xs font-bold font-mono transition relative ${
+                        title={
+                          isPast
+                            ? "Horário já encerrado para hoje"
+                            : isTaken
+                            ? "Horário já reservado"
+                            : timeSlot
+                        }
+                        className={`h-12 rounded-xl text-xs font-bold font-mono transition relative flex flex-col items-center justify-center ${
                           isSelected
                             ? "bg-[#00f0ff] text-[#090a0f] shadow-[0_0_15px_rgba(0,240,255,0.4)] scale-105"
-                            : disabled
+                            : isPast
+                            ? "bg-[#111319] text-gray-600 border border-[#1b1e26] cursor-not-allowed opacity-50"
+                            : isTaken
                             ? "bg-[#14151a] text-gray-600 border border-[#1e2129] cursor-not-allowed line-through"
                             : "bg-[#1c202a] text-gray-300 border border-[#2b303e] hover:border-[#00f0ff] hover:text-white"
                         }`}
                       >
-                        {timeSlot}
+                        <span>{timeSlot}</span>
+                        {isPast && (
+                          <span className="text-[8px] font-sans font-normal text-gray-500 leading-none">
+                            Encerrado
+                          </span>
+                        )}
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              <div className="flex items-center justify-center gap-4 mt-2 text-[11px] text-gray-400">
+              {/* Legend */}
+              <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 mt-2 text-[11px] text-gray-400">
                 <span className="flex items-center gap-1.5">
                   <span className="size-2 rounded-full bg-[#00f0ff]" />
                   Disponível
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="size-2 rounded-full bg-gray-600" />
-                  Ocupado / Fechado
+                  Ocupado
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-gray-700" />
+                  Encerrado / Passado
                 </span>
               </div>
             </div>

@@ -147,6 +147,56 @@ export function isWithinOpeningHours(dateStr: string, timeStr: string, durationM
 }
 
 /**
+ * Verifica se um horário específico já passou (no mesmo dia ou datas passadas).
+ */
+export function isSlotInPast(dateStr: string, timeStr: string, now: Date = new Date()): boolean {
+  if (!dateStr || !timeStr) return false;
+  const today = todayISO();
+  if (dateStr < today) return true;
+  if (dateStr > today) return false;
+
+  const [slotH, slotM] = timeStr.split(":").map(Number);
+  if (isNaN(slotH) || isNaN(slotM)) return false;
+
+  const currentH = now.getHours();
+  const currentM = now.getMinutes();
+
+  return currentH > slotH || (currentH === slotH && currentM >= slotM);
+}
+
+/**
+ * Verifica se o expediente do dia encerrou para novos agendamentos (ex: após as 18:00 ou domingo).
+ */
+export function isDayExpeditedPassed(dateStr: string, now: Date = new Date()): boolean {
+  if (!dateStr) return false;
+  const today = todayISO();
+  if (dateStr < today) return true;
+  if (dateStr > today) return false;
+
+  if (!isOpenDate(dateStr)) return true;
+
+  // O último horário de atendimento do expediente inicia às 18:00 (fecha às 19:00).
+  // Se já for 18:00 ou mais tarde, o expediente do dia encerrou para agendamento.
+  return isSlotInPast(dateStr, "18:00", now);
+}
+
+/**
+ * Retorna a próxima data disponível para agendamento:
+ * Se hoje ainda tiver horário disponível e não for domingo, retorna hoje;
+ * caso contrário, avança para o próximo dia útil.
+ */
+export function getNextAvailableBookingDate(now: Date = new Date()): string {
+  for (let offset = 0; offset <= 30; offset++) {
+    const candidate = getRelativeDateISO(offset);
+    if (!isOpenDate(candidate)) continue;
+    if (offset === 0 && isDayExpeditedPassed(candidate, now)) continue;
+    return candidate;
+  }
+  return todayISO();
+}
+
+
+/**
  * Funções auxiliares para apuração de períodos
  */
 export function isDateToday(dateStr: string): boolean {
@@ -590,11 +640,23 @@ export const actions = {
     if (!service) {
       throw new Error("Serviço não encontrado.");
     }
+    if (!data.date || !data.time) {
+      throw new Error("Selecione uma data e horário válidos.");
+    }
     if (!isOpenDate(data.date)) {
-      throw new Error("A barbearia não abre aos domingos.");
+      throw new Error("A barbearia não abre aos domingos. Selecione outro dia.");
+    }
+    if (data.date < todayISO()) {
+      throw new Error("Não é possível realizar agendamentos para datas passadas.");
+    }
+    if (isDayExpeditedPassed(data.date)) {
+      throw new Error("O expediente de hoje já foi encerrado (atendimentos até às 19h). Por favor, selecione outro dia.");
+    }
+    if (isSlotInPast(data.date, data.time)) {
+      throw new Error("Este horário já encerrou para hoje. Por favor, selecione um horário futuro.");
     }
     if (!isWithinOpeningHours(data.date, data.time, service.duration)) {
-      throw new Error("Horário fora do funcionamento (08h às 12h e 14h às 18h).");
+      throw new Error("Horário fora do funcionamento da barbearia (08h às 12h e 14h às 19h).");
     }
 
     // Check collision
