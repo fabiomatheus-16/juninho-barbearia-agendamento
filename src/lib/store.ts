@@ -761,6 +761,11 @@ export const actions = {
       throw new Error("Horário fora do funcionamento da barbearia (08h às 12h e 14h às 19h).");
     }
 
+    const phoneVal = validateBrazilianPhone(data.clientPhone);
+    if (!phoneVal.isValid) {
+      throw new Error(phoneVal.errorMessage || "Por favor, insira um número de WhatsApp/Telefone válido com DDD.");
+    }
+
     // Check collision
     const collision = state.appointments.some(
       (a) =>
@@ -775,6 +780,7 @@ export const actions = {
 
     const appt: Appointment = {
       ...data,
+      clientPhone: formatBrazilianPhone(data.clientPhone) || data.clientPhone.trim(),
       date: normDate,
       time: normTime,
       id: `appt-${uid()}`,
@@ -1000,6 +1006,173 @@ export function takenSlots(appointments: Appointment[], barberId: string, date: 
     (a) => a.barberId === barberId && normalizeDate(a.date) === normDate && a.status !== "cancelado",
   );
   return new Set(filtered.map((a) => normalizeTime(a.time)));
+}
+
+/**
+ * Conjunto oficial de DDDs válidos no Brasil (Anatel)
+ */
+export const BRAZILIAN_VALID_DDDS = new Set([
+  "11", "12", "13", "14", "15", "16", "17", "18", "19",
+  "21", "22", "24", "27", "28",
+  "31", "32", "33", "34", "35", "37", "38",
+  "41", "42", "43", "44", "45", "46", "47", "48", "49",
+  "51", "53", "54", "55",
+  "61", "62", "63", "64", "65", "66", "67", "68", "69",
+  "71", "73", "74", "75", "77", "79",
+  "81", "82", "83", "84", "85", "86", "87", "88", "89",
+  "91", "92", "93", "94", "95", "96", "97", "98", "99",
+]);
+
+/**
+ * Aplica máscara progressiva padrão brasileira com DDD:
+ * (00) 0000-0000 para fixo (10 dígitos) ou (00) 00000-0000 para celular (11 dígitos).
+ * Bloqueia qualquer caractere que não seja dígito numérico.
+ */
+export function formatBrazilianPhone(value: string): string {
+  if (!value) return "";
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  if (digits.length === 0) return "";
+  if (digits.length <= 2) return `(${digits}`;
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
+}
+
+export interface PhoneValidationResult {
+  isValid: boolean;
+  cleanDigits: string;
+  errorMessage?: string;
+}
+
+/**
+ * Validação rigorosa de número de telefone/WhatsApp brasileiro:
+ * 1. Mínimo e máximo de dígitos (10 para fixo ou 11 para celular)
+ * 2. DDD válido no Brasil
+ * 3. Dígito 9 inicial obrigatório para celulares de 11 dígitos
+ * 4. Bloqueio de sequências repetidas (ex: 99999999, 11111111111, 00000000)
+ * 5. Bloqueio de sequências falsas óbvias (ex: 1234567890)
+ */
+export function validateBrazilianPhone(phone: string): PhoneValidationResult {
+  if (!phone) {
+    return {
+      isValid: false,
+      cleanDigits: "",
+      errorMessage: "Por favor, insira um número de WhatsApp/Telefone com DDD.",
+    };
+  }
+
+  const digits = phone.replace(/\D/g, "");
+
+  if (digits.length === 0) {
+    return {
+      isValid: false,
+      cleanDigits: "",
+      errorMessage: "Por favor, insira um número de WhatsApp/Telefone com DDD.",
+    };
+  }
+
+  if (digits.length < 10) {
+    return {
+      isValid: false,
+      cleanDigits: digits,
+      errorMessage: "Telefone incompleto. Digite o DDD + número (ex: (84) 99457-1579).",
+    };
+  }
+
+  if (digits.length > 11) {
+    return {
+      isValid: false,
+      cleanDigits: digits,
+      errorMessage: "Telefone com dígitos em excesso (máximo 11 dígitos com DDD).",
+    };
+  }
+
+  // 1. Validar se o DDD existe no Brasil
+  const ddd = digits.slice(0, 2);
+  if (!BRAZILIAN_VALID_DDDS.has(ddd)) {
+    return {
+      isValid: false,
+      cleanDigits: digits,
+      errorMessage: `DDD (${ddd}) inválido. Insira um DDD brasileiro válido (ex: 84, 83, 81, 11...).`,
+    };
+  }
+
+  // 2. Bloquear se todos os dígitos forem idênticos (ex: 11111111111, 99999999999, 00000000000)
+  if (/^(\d)\1+$/.test(digits)) {
+    return {
+      isValid: false,
+      cleanDigits: digits,
+      errorMessage: "Número inválido. Sequências com dígitos repetidos não são permitidas.",
+    };
+  }
+
+  // 3. Bloquear se a parte do assinante (após o DDD) for repetida (ex: (84) 99999-9999 ou (84) 00000-0000)
+  const subscriber = digits.slice(2);
+  if (/^(\d)\1+$/.test(subscriber)) {
+    return {
+      isValid: false,
+      cleanDigits: digits,
+      errorMessage: "Número inválido. Evite sequências de teste repetidas (ex: 99999-9999).",
+    };
+  }
+
+  // 4. Regra para Celulares (11 dígitos): deve iniciar com 9 após o DDD
+  if (digits.length === 11) {
+    if (subscriber[0] !== "9") {
+      return {
+        isValid: false,
+        cleanDigits: digits,
+        errorMessage: "Celulares com 11 dígitos devem começar com 9 após o DDD (ex: (84) 9XXXX-XXXX).",
+      };
+    }
+
+    // Bloquear casos onde os 8 dígitos após o 9 inicial são repetidos (ex: 90000-0000, 98888-8888)
+    const rest = subscriber.slice(1);
+    if (/^(\d)\1+$/.test(rest)) {
+      return {
+        isValid: false,
+        cleanDigits: digits,
+        errorMessage: "Número inválido. Sequências repetidas de teste não são aceitas.",
+      };
+    }
+  }
+
+  // 5. Regra para Fixos (10 dígitos): deve iniciar entre 2 e 5
+  if (digits.length === 10) {
+    if (!["2", "3", "4", "5"].includes(subscriber[0])) {
+      return {
+        isValid: false,
+        cleanDigits: digits,
+        errorMessage: "Telefones fixos com 10 dígitos devem começar com 2, 3, 4 ou 5 após o DDD.",
+      };
+    }
+  }
+
+  // 6. Sequências falsas conhecidas
+  const knownFakes = new Set([
+    "1234567890",
+    "0123456789",
+    "12345678901",
+    "9876543210",
+    "98765432109",
+    "0987654321",
+    "12345678",
+    "87654321",
+    "987654321",
+    "123456789",
+  ]);
+
+  if (knownFakes.has(digits) || knownFakes.has(subscriber)) {
+    return {
+      isValid: false,
+      cleanDigits: digits,
+      errorMessage: "Por favor, insira um número de telefone real, não uma sequência de teste.",
+    };
+  }
+
+  return { isValid: true, cleanDigits: digits };
 }
 
 export function buildWhatsappLink(phoneDigits: string, message: string): string {

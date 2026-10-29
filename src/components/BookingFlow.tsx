@@ -4,6 +4,7 @@ import {
   Calendar,
   Check,
   CheckCircle,
+  CheckCircle2,
   Clock,
   MessageCircle,
   Scissors,
@@ -36,6 +37,8 @@ import {
   TIME_SLOTS,
   todayISO,
   useStore,
+  formatBrazilianPhone,
+  validateBrazilianPhone,
 } from "../lib/store";
 import type { Appointment, Service, Barber } from "../types";
 import { BrandLogo } from "./ui/BrandLogo";
@@ -65,6 +68,7 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
   const [selectedTime, setSelectedTime] = useState<string>("");
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
+  const [phoneTouched, setPhoneTouched] = useState(false);
   const [notes, setNotes] = useState("");
 
   const [bookingSuccess, setBookingSuccess] = useState<Appointment | null>(null);
@@ -72,6 +76,11 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
 
   const selectedService = services.find((s) => s.id === selectedServiceId);
   const selectedBarber = barbers.find((b) => b.id === selectedBarberId);
+
+  // Validação em tempo real do número de telefone brasileiro
+  const phoneValidation = useMemo(() => {
+    return validateBrazilianPhone(clientPhone);
+  }, [clientPhone]);
 
   // Taken slots for the chosen barber on chosen date
   const taken = useMemo(() => {
@@ -94,9 +103,9 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
           !isDayExpeditedPassed(selectedDate)
         );
       case 3:
-        return (
+        return Boolean(
           clientName.trim().length >= 2 &&
-          clientPhone.replace(/\D/g, "").length >= 10
+          phoneValidation.isValid
         );
       default:
         return false;
@@ -108,13 +117,23 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
     selectedDate,
     selectedTime,
     clientName,
-    clientPhone,
+    phoneValidation.isValid,
   ]);
 
   const handleNext = () => {
     setBookingError(null);
     if (step < 3) {
       setStep(step + 1);
+      return;
+    }
+
+    // Validação estrita do telefone no passo final
+    if (!phoneValidation.isValid) {
+      setPhoneTouched(true);
+      setBookingError(
+        phoneValidation.errorMessage ||
+        "Por favor, insira um número de WhatsApp/Telefone válido com DDD."
+      );
       return;
     }
 
@@ -191,16 +210,9 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
 
   // Formatter for Phone Input
   const handlePhoneChange = (val: string) => {
-    const digits = val.replace(/\D/g, "").slice(0, 11);
-    if (digits.length <= 2) {
-      setClientPhone(digits);
-    } else if (digits.length <= 7) {
-      setClientPhone(`(${digits.slice(0, 2)}) ${digits.slice(2)}`);
-    } else {
-      setClientPhone(
-        `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
-      );
-    }
+    const formatted = formatBrazilianPhone(val);
+    setClientPhone(formatted);
+    if (bookingError) setBookingError(null);
   };
 
   // SUCCESS SCREEN
@@ -883,20 +895,61 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
-                Seu WhatsApp com DDD *
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Seu WhatsApp com DDD *
+                </label>
+                {clientPhone && phoneValidation.isValid && (
+                  <span className="text-[11px] text-emerald-400 flex items-center gap-1 font-medium animate-in fade-in">
+                    <CheckCircle2 className="size-3 text-emerald-400" />
+                    Telefone Válido
+                  </span>
+                )}
+              </div>
               <div className="relative">
-                <Phone className="size-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Phone
+                  className={`size-4 absolute left-3.5 top-1/2 -translate-y-1/2 transition ${
+                    phoneTouched && !phoneValidation.isValid
+                      ? "text-red-400"
+                      : clientPhone && phoneValidation.isValid
+                      ? "text-emerald-400"
+                      : "text-gray-400"
+                  }`}
+                />
                 <input
                   type="tel"
                   required
-                  placeholder="(84) 99999-9999"
+                  placeholder="(84) 99457-1579"
                   value={clientPhone}
                   onChange={(e) => handlePhoneChange(e.target.value)}
-                  className="w-full h-12 rounded-xl bg-[#161820] border border-[#272a34] pl-10 pr-4 text-white text-sm focus:outline-none focus:border-[#00f0ff]"
+                  onBlur={() => setPhoneTouched(true)}
+                  className={`w-full h-12 rounded-xl pl-10 pr-10 text-white text-sm focus:outline-none transition ${
+                    phoneTouched && !phoneValidation.isValid
+                      ? "bg-red-500/10 border border-red-500/50 focus:border-red-400 focus:ring-1 focus:ring-red-400/50"
+                      : clientPhone && phoneValidation.isValid
+                      ? "bg-emerald-500/5 border border-emerald-500/40 focus:border-emerald-400"
+                      : "bg-[#161820] border border-[#272a34] focus:border-[#00f0ff]"
+                  }`}
                 />
+                {clientPhone && phoneValidation.isValid && (
+                  <CheckCircle2 className="size-4 text-emerald-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                )}
               </div>
+
+              {/* Mensagem de Erro Visual Explícita */}
+              {phoneTouched && !phoneValidation.isValid && (
+                <div className="mt-1.5 flex items-start gap-1.5 text-xs text-red-400 animate-in fade-in">
+                  <AlertCircle className="size-3.5 shrink-0 mt-0.5 text-red-400" />
+                  <span>{phoneValidation.errorMessage}</span>
+                </div>
+              )}
+
+              {/* Dica de formato */}
+              {(!phoneTouched || phoneValidation.isValid) && (
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Formato: (DD) 9XXXX-XXXX para celular ou (DD) XXXX-XXXX para fixo.
+                </p>
+              )}
             </div>
 
             <div>

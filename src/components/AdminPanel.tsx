@@ -52,6 +52,8 @@ import {
   isOpenDate,
   normalizeDate,
   normalizeTime,
+  formatBrazilianPhone,
+  validateBrazilianPhone,
 } from "../lib/store";
 import {
   DEFAULT_TENANT_ID,
@@ -234,13 +236,19 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
         showToast("Nenhum serviço disponível.");
         return;
       }
+      const phoneVal = validateBrazilianPhone(newApptClientPhone);
+      if (!phoneVal.isValid) {
+        showToast(phoneVal.errorMessage || "Por favor, insira um número de WhatsApp/Telefone válido com DDD.");
+        return;
+      }
+
       actions.addAppointment({
         serviceId: svcId,
         barberId: newApptBarberId || barbers[0]?.id || "barber-1",
         date: normalizeDate(newApptDate),
         time: normalizeTime(newApptTime),
         clientName: newApptClientName.trim(),
-        clientPhone: newApptClientPhone.trim(),
+        clientPhone: formatBrazilianPhone(newApptClientPhone),
         notes: newApptNotes.trim() || undefined,
       });
       setIsAddApptModalOpen(false);
@@ -1949,16 +1957,19 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
 
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
-                  WhatsApp / Telefone *
+                  WhatsApp / Telefone com DDD *
                 </label>
                 <input
                   type="tel"
                   required
-                  placeholder="Ex: 84994571579"
+                  placeholder="(84) 99457-1579"
                   value={newApptClientPhone}
-                  onChange={(e) => setNewApptClientPhone(e.target.value)}
+                  onChange={(e) => setNewApptClientPhone(formatBrazilianPhone(e.target.value))}
                   className="w-full h-11 rounded-xl bg-[#1c202a] border border-[#2b303e] px-4 text-white text-sm focus:outline-none focus:border-[#00f0ff]"
                 />
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Formato: (00) 00000-0000 ou (00) 0000-0000 com DDD válido.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
