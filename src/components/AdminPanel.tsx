@@ -1608,7 +1608,71 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
             </div>
           )}
 
-          {/* 1. Formulário de Credenciais */}
+          {/* 1. Card de Blindagem de Segurança & Logout Global de Sessões */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-b from-[#181a24] to-[#12141a] border border-[#00f0ff]/30 space-y-4 shadow-[0_0_25px_rgba(0,240,255,0.08)]">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-[#00f0ff]/10 text-[#00f0ff] border border-[#00f0ff]/20">
+                  <Shield className="size-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white font-display">
+                    Blindagem de Acesso & Sessões Ativas
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Controle de invalidação de tokens e proteção contra acessos indevidos
+                  </p>
+                </div>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold uppercase shrink-0">
+                Protegido
+              </span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[#14161f] border border-[#232734] space-y-2 text-xs">
+              <div className="flex justify-between items-center text-gray-300">
+                <span>Credencial de Acesso Ativa (Senha / PIN):</span>
+                <span className="font-mono font-bold text-[#00f0ff] bg-[#00f0ff]/10 px-2 py-0.5 rounded border border-[#00f0ff]/30">
+                  8922
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-gray-300">
+                <span>Versão da Blindagem de Sessão:</span>
+                <span className="font-mono text-[11px] text-gray-400">
+                  v3-lockout-8922
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-gray-300">
+                <span>Status das Sessões:</span>
+                <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                  <Check className="size-3 text-emerald-400" />
+                  Sessões legadas invalidadas
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "Tem certeza que deseja forçar o encerramento imediato de todas as sessões ativas? Você e qualquer outro dispositivo serão deslogados na hora e precisarão entrar novamente com o PIN 8922."
+                    )
+                  ) {
+                    actions.forceGlobalLogout();
+                    onLogout();
+                  }
+                }}
+                className="w-full h-11 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/40 text-red-400 hover:text-red-300 text-xs font-bold transition flex items-center justify-center gap-2 active:scale-95"
+              >
+                <LogOut className="size-4" />
+                <span>Encerrar Todas as Sessões Ativas (Logout Global)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 2. Formulário de Credenciais */}
           <form
             onSubmit={handleSaveSettings}
             className="p-5 sm:p-6 rounded-2xl bg-[#161820] border border-[#272a34] space-y-4"

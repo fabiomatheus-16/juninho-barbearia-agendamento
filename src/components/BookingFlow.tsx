@@ -100,7 +100,8 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
           selectedTime &&
           isOpenDate(selectedDate) &&
           !isSlotInPast(selectedDate, selectedTime) &&
-          !isDayExpeditedPassed(selectedDate)
+          !isDayExpeditedPassed(selectedDate) &&
+          !taken.has(selectedTime)
         );
       case 3:
         return Boolean(
@@ -118,11 +119,26 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
     selectedTime,
     clientName,
     phoneValidation.isValid,
+    taken,
   ]);
 
   const handleNext = () => {
     setBookingError(null);
     if (step < 3) {
+      if (step === 2) {
+        if (!selectedTime) {
+          setBookingError("Por favor, selecione um horário para prosseguir.");
+          return;
+        }
+        if (taken.has(selectedTime)) {
+          setBookingError("Este horário já está reservado com este barbeiro. Por favor, escolha outro.");
+          return;
+        }
+        if (isSlotInPast(selectedDate, selectedTime)) {
+          setBookingError("Este horário já encerrou para hoje. Por favor, selecione um horário futuro.");
+          return;
+        }
+      }
       setStep(step + 1);
       return;
     }

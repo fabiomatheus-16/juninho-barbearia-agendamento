@@ -260,12 +260,38 @@ export async function fetchAppointmentsFromCloud(): Promise<Appointment[] | null
  */
 export async function saveAppointmentToCloud(appointment: Appointment): Promise<string | null> {
   try {
+    const normDate = normalizeDate(appointment.date);
+    const normTime = normalizeTime(appointment.time);
+
+    // Validação preventiva em nível de nuvem
+    if (!normDate || !normTime) {
+      console.warn("Tentativa de salvar agendamento sem data ou hora válida.");
+      return null;
+    }
+
+    // Verificar se o horário já está reservado no Supabase (blindagem contra agendamento concorrente)
+    const { data: existingBookings, error: checkError } = await supabase
+      .from("appointments")
+      .select("id")
+      .eq("date", normDate)
+      .eq("time", normTime)
+      .eq("barber_id", appointment.barberId)
+      .neq("status", "cancelado")
+      .limit(1);
+
+    if (!checkError && existingBookings && existingBookings.length > 0) {
+      console.warn(
+        `Horário ${normDate} às ${normTime} já está reservado no Supabase para o barbeiro ${appointment.barberId}.`
+      );
+      return null;
+    }
+
     const payload = {
       id: appointment.id,
       service_id: appointment.serviceId,
       barber_id: appointment.barberId,
-      date: normalizeDate(appointment.date),
-      time: normalizeTime(appointment.time),
+      date: normDate,
+      time: normTime,
       client_name: appointment.clientName,
       client_phone: appointment.clientPhone,
       status: appointment.status,

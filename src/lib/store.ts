@@ -246,6 +246,8 @@ export function isDateThisMonth(dateStr: string): boolean {
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
+export const AUTH_SESSION_VERSION = "20261101_v3_security_lockout_8922";
+
 type AppState = {
   services: Service[];
   barbers: Barber[];
@@ -253,12 +255,13 @@ type AppState = {
   adminAuth: {
     isAuthenticated: boolean;
     adminEmail: string;
+    sessionVersion?: string;
     token?: string;
   };
   adminCredentials: {
     email: string;
-    password: string; // padrão "admin123"
-    pin: string; // padrão "1234"
+    password: string; // padrão "8922"
+    pin: string; // padrão "8922"
   };
   supabaseConfig: SupabaseConfig;
 };
@@ -267,10 +270,22 @@ const STORAGE_KEYS = {
   SERVICES: "junin_services_v2",
   BARBERS: "junin_barbers_v2",
   APPOINTMENTS: "junin_appointments_v3",
-  AUTH: "junin_admin_auth_v2",
-  CREDENTIALS: "junin_admin_creds_v2",
+  AUTH: "junin_admin_auth_v3",
+  CREDENTIALS: "junin_admin_creds_v3",
   SUPABASE_CONFIG: "junin_supabase_config_v2",
 };
+
+// Limpeza e invalidação forçada de quaisquer sessões ou credenciais antigas
+try {
+  localStorage.removeItem("junin_admin_auth_v2");
+  localStorage.removeItem("junin_admin_auth");
+  localStorage.removeItem("junin_admin_creds_v2");
+  localStorage.removeItem("junin_admin_creds");
+  sessionStorage.removeItem("junin_admin_auth");
+  sessionStorage.removeItem("junin_admin_auth_v2");
+} catch {
+  // Ignora se o localStorage estiver restrito
+}
 
 function getStored<T>(key: string, fallback: T): T {
   try {
@@ -575,19 +590,61 @@ function getInitialAppointments(): Appointment[] {
   ];
 }
 
+const DEFAULT_ADMIN_CREDS = {
+  email: "admin@juninbarbeiro.com",
+  password: "8922",
+  pin: "8922",
+};
+
+// Obter credenciais e garantir atualização para 8922 se estiver na credencial antiga
+let loadedCreds = getStored(STORAGE_KEYS.CREDENTIALS, DEFAULT_ADMIN_CREDS);
+if (
+  !loadedCreds ||
+  loadedCreds.password === "admin123" ||
+  loadedCreds.pin === "1234" ||
+  !loadedCreds.pin ||
+  !loadedCreds.password
+) {
+  loadedCreds = {
+    email: loadedCreds?.email || "admin@juninbarbeiro.com",
+    password: "8922",
+    pin: "8922",
+  };
+  saveStored(STORAGE_KEYS.CREDENTIALS, loadedCreds);
+}
+
+// Invalidação mandatória de sessões ativas existentes (Logout Global)
+const storedAuth = getStored<{
+  isAuthenticated: boolean;
+  adminEmail: string;
+  sessionVersion?: string;
+  token?: string;
+}>(STORAGE_KEYS.AUTH, {
+  isAuthenticated: false,
+  adminEmail: "admin@juninbarbeiro.com",
+  sessionVersion: AUTH_SESSION_VERSION,
+});
+
+const initialAuth =
+  storedAuth && storedAuth.sessionVersion === AUTH_SESSION_VERSION && storedAuth.isAuthenticated
+    ? storedAuth
+    : {
+        isAuthenticated: false,
+        adminEmail: "admin@juninbarbeiro.com",
+        sessionVersion: AUTH_SESSION_VERSION,
+      };
+
+// Se a sessão armazenada for inválida ou antiga, sobrescreve forçando o logout
+if (storedAuth?.sessionVersion !== AUTH_SESSION_VERSION) {
+  saveStored(STORAGE_KEYS.AUTH, initialAuth);
+}
+
 let state: AppState = {
   services: getStored<Service[]>(STORAGE_KEYS.SERVICES, INITIAL_SERVICES),
   barbers: getStored<Barber[]>(STORAGE_KEYS.BARBERS, INITIAL_BARBERS),
   appointments: getStored<Appointment[]>(STORAGE_KEYS.APPOINTMENTS, getInitialAppointments()),
-  adminAuth: getStored(STORAGE_KEYS.AUTH, {
-    isAuthenticated: false,
-    adminEmail: "admin@juninbarbeiro.com",
-  }),
-  adminCredentials: getStored(STORAGE_KEYS.CREDENTIALS, {
-    email: "admin@juninbarbeiro.com",
-    password: "admin123",
-    pin: "1234",
-  }),
+  adminAuth: initialAuth,
+  adminCredentials: loadedCreds,
   supabaseConfig: getStored(STORAGE_KEYS.SUPABASE_CONFIG, {
     enabled: false,
     supabaseUrl: "",
@@ -847,15 +904,17 @@ export const actions = {
   // Admin Authentication Actions
   loginAdmin(emailOrPin: string, password?: string): boolean {
     const creds = state.adminCredentials;
-    const isPinMatch = emailOrPin === creds.pin;
+    const cleanInput = (emailOrPin || "").trim();
+    const isPinMatch = cleanInput === creds.pin;
     const isEmailPassMatch =
-      emailOrPin.trim().toLowerCase() === creds.email.toLowerCase() &&
-      password === creds.password;
+      cleanInput.toLowerCase() === creds.email.toLowerCase() &&
+      password?.trim() === creds.password;
 
     if (isPinMatch || isEmailPassMatch) {
       const auth = {
         isAuthenticated: true,
         adminEmail: creds.email,
+        sessionVersion: AUTH_SESSION_VERSION,
         token: `session-${uid()}-${Date.now()}`,
       };
       update((s) => {
@@ -871,6 +930,27 @@ export const actions = {
     const auth = {
       isAuthenticated: false,
       adminEmail: state.adminCredentials.email,
+      sessionVersion: AUTH_SESSION_VERSION,
+    };
+    update((s) => {
+      saveStored(STORAGE_KEYS.AUTH, auth);
+      return { ...s, adminAuth: auth };
+    });
+  },
+
+  forceGlobalLogout() {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.AUTH);
+      localStorage.removeItem("junin_admin_auth_v2");
+      localStorage.removeItem("junin_admin_auth");
+      sessionStorage.clear();
+    } catch {
+      // Ignora erro
+    }
+    const auth = {
+      isAuthenticated: false,
+      adminEmail: state.adminCredentials.email,
+      sessionVersion: AUTH_SESSION_VERSION,
     };
     update((s) => {
       saveStored(STORAGE_KEYS.AUTH, auth);
@@ -1046,16 +1126,31 @@ export interface PhoneValidationResult {
   errorMessage?: string;
 }
 
+function isSequentialSequence(str: string): boolean {
+  if (str.length < 5) return false;
+  let isAsc = true;
+  let isDesc = true;
+  for (let i = 1; i < str.length; i++) {
+    const prev = Number(str[i - 1]);
+    const curr = Number(str[i]);
+    if (isNaN(prev) || isNaN(curr)) return false;
+    if (curr !== (prev + 1) % 10) isAsc = false;
+    if (curr !== (prev + 9) % 10) isDesc = false;
+  }
+  return isAsc || isDesc;
+}
+
 /**
  * Validação rigorosa de número de telefone/WhatsApp brasileiro:
  * 1. Mínimo e máximo de dígitos (10 para fixo ou 11 para celular)
- * 2. DDD válido no Brasil
- * 3. Dígito 9 inicial obrigatório para celulares de 11 dígitos
- * 4. Bloqueio de sequências repetidas (ex: 99999999, 11111111111, 00000000)
- * 5. Bloqueio de sequências falsas óbvias (ex: 1234567890)
+ * 2. Bloqueio de sequências curtas (ex: números de 1 a 8, textos aleatórios)
+ * 3. DDD válido no Brasil (Anatel)
+ * 4. Dígito 9 inicial obrigatório para celulares de 11 dígitos
+ * 5. Bloqueio de sequências repetidas (ex: 99999999, 11111111111, 00000000)
+ * 6. Bloqueio de sequências contínuas de teste (ex: 12345678, 1 a 8, 98765432)
  */
 export function validateBrazilianPhone(phone: string): PhoneValidationResult {
-  if (!phone) {
+  if (!phone || typeof phone !== "string") {
     return {
       isValid: false,
       cleanDigits: "",
@@ -1073,11 +1168,12 @@ export function validateBrazilianPhone(phone: string): PhoneValidationResult {
     };
   }
 
+  // Bloqueio rigoroso de sequências curtas ou incompletas (ex: 1 a 8 dígitos)
   if (digits.length < 10) {
     return {
       isValid: false,
       cleanDigits: digits,
-      errorMessage: "Telefone incompleto. Digite o DDD + número (ex: (84) 99457-1579).",
+      errorMessage: `Telefone incompleto (${digits.length} dígitos informados). Digite o DDD + número com 10 ou 11 dígitos (ex: (84) 99457-1579).`,
     };
   }
 
@@ -1085,17 +1181,17 @@ export function validateBrazilianPhone(phone: string): PhoneValidationResult {
     return {
       isValid: false,
       cleanDigits: digits,
-      errorMessage: "Telefone com dígitos em excesso (máximo 11 dígitos com DDD).",
+      errorMessage: "Telefone com excesso de dígitos (máximo 11 dígitos com DDD).",
     };
   }
 
-  // 1. Validar se o DDD existe no Brasil
+  // 1. Validar se o DDD existe no Brasil (Anatel)
   const ddd = digits.slice(0, 2);
   if (!BRAZILIAN_VALID_DDDS.has(ddd)) {
     return {
       isValid: false,
       cleanDigits: digits,
-      errorMessage: `DDD (${ddd}) inválido. Insira um DDD brasileiro válido (ex: 84, 83, 81, 11...).`,
+      errorMessage: `DDD (${ddd}) inválido. Informe um DDD brasileiro válido (ex: 84, 83, 81, 11...).`,
     };
   }
 
@@ -1118,13 +1214,22 @@ export function validateBrazilianPhone(phone: string): PhoneValidationResult {
     };
   }
 
-  // 4. Regra para Celulares (11 dígitos): deve iniciar com 9 após o DDD
+  // 4. Bloquear sequências contínuas óbvias (ex: 12345678, 123456789, 87654321, 1 a 8)
+  if (isSequentialSequence(digits) || isSequentialSequence(subscriber)) {
+    return {
+      isValid: false,
+      cleanDigits: digits,
+      errorMessage: "Número inválido. Sequências numéricas contínuas (como 1 a 8 ou 123456) não são aceitas.",
+    };
+  }
+
+  // 5. Regra para Celulares (11 dígitos): deve iniciar com 9 após o DDD
   if (digits.length === 11) {
     if (subscriber[0] !== "9") {
       return {
         isValid: false,
         cleanDigits: digits,
-        errorMessage: "Celulares com 11 dígitos devem começar com 9 após o DDD (ex: (84) 9XXXX-XXXX).",
+        errorMessage: "Celulares com 11 dígitos devem começar com o dígito 9 após o DDD (ex: (84) 9XXXX-XXXX).",
       };
     }
 
@@ -1134,12 +1239,20 @@ export function validateBrazilianPhone(phone: string): PhoneValidationResult {
       return {
         isValid: false,
         cleanDigits: digits,
-        errorMessage: "Número inválido. Sequências repetidas de teste não são aceitas.",
+        errorMessage: "Número de celular inválido. Sequências repetidas de teste não são aceitas.",
+      };
+    }
+
+    if (isSequentialSequence(rest)) {
+      return {
+        isValid: false,
+        cleanDigits: digits,
+        errorMessage: "Número inválido. Sequências numéricas de teste não são permitidas.",
       };
     }
   }
 
-  // 5. Regra para Fixos (10 dígitos): deve iniciar entre 2 e 5
+  // 6. Regra para Fixos (10 dígitos): deve iniciar entre 2 e 5
   if (digits.length === 10) {
     if (!["2", "3", "4", "5"].includes(subscriber[0])) {
       return {
@@ -1150,7 +1263,7 @@ export function validateBrazilianPhone(phone: string): PhoneValidationResult {
     }
   }
 
-  // 6. Sequências falsas conhecidas
+  // 7. Lista de sequências de teste conhecidas
   const knownFakes = new Set([
     "1234567890",
     "0123456789",
@@ -1162,6 +1275,7 @@ export function validateBrazilianPhone(phone: string): PhoneValidationResult {
     "87654321",
     "987654321",
     "123456789",
+    "1234567890",
   ]);
 
   if (knownFakes.has(digits) || knownFakes.has(subscriber)) {
