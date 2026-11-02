@@ -2026,7 +2026,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps) {
                 <input
                   type="tel"
                   required
-                  placeholder="(84) 99457-1579"
+                  placeholder="(84) 99201-5724"
                   value={newApptClientPhone}
                   onChange={(e) => setNewApptClientPhone(formatBrazilianPhone(e.target.value))}
                   className="w-full h-11 rounded-xl bg-[#1c202a] border border-[#2b303e] px-4 text-white text-sm focus:outline-none focus:border-[#00f0ff]"

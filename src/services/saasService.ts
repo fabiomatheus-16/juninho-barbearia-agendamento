@@ -16,7 +16,7 @@ export const DEFAULT_TENANT_INFO: Tenant = {
   slug: "junin-barbeiro",
   name: "Junin Barbeiro",
   ownerEmail: "admin@juninbarbeiro.com",
-  phone: "5584994571579",
+  phone: "5584992015724",
   plan: "pro",
   maxBarbers: 5,
   active: true,

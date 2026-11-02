@@ -19,8 +19,8 @@ export { normalizeDate, normalizeTime };
 export const SHOP: ShopInfo = {
   name: "Junin Barbeiro",
   tagline: "Barbearia clássica, corte moderno & estilo único",
-  whatsapp: "5584994571579",
-  phoneDisplay: "(84) 99457-1579",
+  whatsapp: "5584992015724",
+  phoneDisplay: "(84) 99201-5724",
   address: "Rua Principal, Centro",
   founded: 2021,
   hours: "Segunda a Sábado · 08h–12h e 14h–19h",
@@ -1281,7 +1281,7 @@ export function validateBrazilianPhone(phone: string): PhoneValidationResult {
     return {
       isValid: false,
       cleanDigits: digits,
-      errorMessage: `Telefone incompleto (${digits.length} dígitos informados). Digite o DDD + número com 10 ou 11 dígitos (ex: (84) 99457-1579).`,
+      errorMessage: `Telefone incompleto (${digits.length} dígitos informados). Digite o DDD + número com 10 ou 11 dígitos (ex: (84) 99201-5724).`,
     };
   }
 

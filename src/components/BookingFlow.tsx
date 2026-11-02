@@ -1074,7 +1074,7 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
                 <input
                   type="tel"
                   required
-                  placeholder="(84) 99457-1579"
+                  placeholder="(84) 99201-5724"
                   value={clientPhone}
                   onChange={(e) => handlePhoneChange(e.target.value)}
                   onBlur={() => setPhoneTouched(true)}
