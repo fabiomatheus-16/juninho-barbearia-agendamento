@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS public.services (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- 3. TABELA DE AGENDAMENTOS
+-- 3. TABELA DE AGENDAMENTOS COM BLINDAGEM DE SEGURANÇA
 CREATE TABLE IF NOT EXISTS public.appointments (
   id text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   service_id text NOT NULL,
@@ -81,17 +81,61 @@ CREATE TABLE IF NOT EXISTS public.appointments (
   time text NOT NULL,
   client_name text NOT NULL,
   client_phone text NOT NULL,
+  price numeric(10,2) NOT NULL DEFAULT 20.00,
   status text NOT NULL DEFAULT 'agendado',
   notes text,
   tenant_id text DEFAULT 'junin-barbeiro-natal',
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- 4. ÍNDICES DE PERFORMANCE
+-- Garantir coluna price caso a tabela já tenha sido criada anteriormente
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS price numeric(10,2) NOT NULL DEFAULT 20.00;
+
+-- 4. CHECK CONSTRAINTS DE SEGURANÇA (DEFESA NO BANCO CONTRA SPAM, BOTS E VALORES ZERADOS)
+DO $$
+BEGIN
+  -- 4.1 Validação de Nome: Mínimo 3 caracteres
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_appointments_name_len') THEN
+    ALTER TABLE public.appointments
+      ADD CONSTRAINT chk_appointments_name_len
+      CHECK (char_length(trim(client_name)) >= 3);
+  END IF;
+
+  -- 4.2 Validação de Nome: Apenas letras, acentos e espaços (bloqueia números e scripts)
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_appointments_name_format') THEN
+    ALTER TABLE public.appointments
+      ADD CONSTRAINT chk_appointments_name_format
+      CHECK (client_name ~* '^[A-Za-zÀ-ÖØ-öø-ÿ\s'']+$');
+  END IF;
+
+  -- 4.3 Anti-Tampering de Preço: Preço estritamente maior que 0
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_appointments_price_positive') THEN
+    ALTER TABLE public.appointments
+      ADD CONSTRAINT chk_appointments_price_positive
+      CHECK (price > 0);
+  END IF;
+
+  -- 4.4 Validação de Telefone Brasileiro com DDD e celular com 9
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_appointments_phone_format') THEN
+    ALTER TABLE public.appointments
+      ADD CONSTRAINT chk_appointments_phone_format
+      CHECK (client_phone ~ '^\([1-9]{2}\)\s9[0-9]{4}-[0-9]{4}$');
+  END IF;
+
+  -- 4.5 Serviços: Preço cadastrado também deve ser maior que zero
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_services_price_positive') THEN
+    ALTER TABLE public.services
+      ADD CONSTRAINT chk_services_price_positive
+      CHECK (price > 0);
+  END IF;
+END $$;
+
+-- 5. ÍNDICES DE PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_services_sort ON public.services(sort_order);
 CREATE INDEX IF NOT EXISTS idx_appointments_date_time ON public.appointments(date, time);
+CREATE INDEX IF NOT EXISTS idx_appointments_status ON public.appointments(status);
 
--- 5. HABILITAR PERMISSÕES (ROW LEVEL SECURITY - RLS)
+-- 6. HABILITAR PERMISSÕES (ROW LEVEL SECURITY - RLS)
 ALTER TABLE public.services ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.appointments ENABLE ROW LEVEL SECURITY;
 
@@ -107,7 +151,7 @@ CREATE POLICY "Acesso total aos agendamentos"
   USING (true)
   WITH CHECK (true);
 
--- 6. HABILITAR SINCRONIZAÇÃO EM TEMPO REAL (REALTIME DE FORMA SEGURA)
+-- 7. HABILITAR SINCRONIZAÇÃO EM TEMPO REAL (REALTIME DE FORMA SEGURA)
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
@@ -127,7 +171,7 @@ BEGIN
   END IF;
 END $$;
 
--- 7. POVOAR COM OS 5 SERVIÇOS OFICIAIS DO JUNIN BARBEIRO (Sem duplicar se já existirem)
+-- 8. POVOAR COM OS 5 SERVIÇOS OFICIAIS DO JUNIN BARBEIRO (Sem duplicar se já existirem)
 INSERT INTO public.services (name, price, duration, category, sort_order)
 SELECT v.name, v.price, v.duration, v.category, v.sort_order
 FROM (

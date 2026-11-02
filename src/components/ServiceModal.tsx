@@ -163,9 +163,9 @@ export function ServiceModal({
                 <input
                   type="number"
                   step="0.50"
-                  min="0"
+                  min="1"
                   required
-                  placeholder="0,00"
+                  placeholder="25,00"
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
                   className="w-full h-12 rounded-xl bg-[#1c202a] border border-[#2b303e] pl-10 pr-4 text-white text-base font-semibold focus:outline-none focus:border-[#00f0ff] focus:ring-1 focus:ring-[#00f0ff] transition"

@@ -792,10 +792,31 @@ export const actions = {
 
   // Appointment Actions
   addAppointment(data: Omit<Appointment, "id" | "status" | "createdAt">): Appointment {
+    // 1. Anti-Tampering de Preço: valida e recalcula o preço diretamente do catálogo oficial de serviços
     const service = state.services.find((s) => s.id === data.serviceId);
     if (!service) {
-      throw new Error("Serviço não encontrado.");
+      throw new Error("Serviço não encontrado no catálogo oficial.");
     }
+    if (service.active === false) {
+      throw new Error("O serviço selecionado não está ativo para agendamentos.");
+    }
+    const verifiedPrice = Number(service.price);
+    if (isNaN(verifiedPrice) || verifiedPrice <= 0) {
+      throw new Error("Preço do serviço inválido ou zerado (R$ 0,00). O agendamento foi bloqueado por segurança.");
+    }
+
+    // 2. Validação Rigorosa de Nome do Cliente (mínimo 3 caracteres, apenas letras e espaços)
+    const nameVal = validateClientName(data.clientName);
+    if (!nameVal.isValid) {
+      throw new Error(nameVal.errorMessage || "Por favor, informe um nome válido com no mínimo 3 caracteres.");
+    }
+
+    // 3. Validação Rigorosa de Telefone / WhatsApp Brasileiro
+    const phoneVal = validateBrazilianPhone(data.clientPhone);
+    if (!phoneVal.isValid) {
+      throw new Error(phoneVal.errorMessage || "Por favor, insira um número de WhatsApp/Telefone válido com DDD.");
+    }
+
     const normDate = normalizeDate(data.date);
     const normTime = normalizeTime(data.time);
 
@@ -818,11 +839,6 @@ export const actions = {
       throw new Error("Horário fora do funcionamento da barbearia (08h às 12h e 14h às 19h).");
     }
 
-    const phoneVal = validateBrazilianPhone(data.clientPhone);
-    if (!phoneVal.isValid) {
-      throw new Error(phoneVal.errorMessage || "Por favor, insira um número de WhatsApp/Telefone válido com DDD.");
-    }
-
     // Check collision
     const collision = state.appointments.some(
       (a) =>
@@ -837,9 +853,11 @@ export const actions = {
 
     const appt: Appointment = {
       ...data,
+      clientName: nameVal.cleanName,
       clientPhone: formatBrazilianPhone(data.clientPhone) || data.clientPhone.trim(),
       date: normDate,
       time: normTime,
+      price: verifiedPrice, // Preço validado e blindado contra manipulação no payload
       id: `appt-${uid()}`,
       status: "agendado",
       createdAt: todayISO(),
@@ -1120,6 +1138,96 @@ export function formatBrazilianPhone(value: string): string {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
 }
 
+export interface NameValidationResult {
+  isValid: boolean;
+  cleanName: string;
+  errorMessage?: string;
+}
+
+/**
+ * Validação rigorosa de Nome do Cliente (Anti-Bot & Anti-Spam):
+ * 1. Exige no mínimo 3 caracteres
+ * 2. Permite apenas letras (incluindo acentuação em português) e espaços
+ * 3. Bloqueia números e caracteres especiais
+ * 4. Bloqueia repetições óbvias de uma mesma letra (ex: "aaa", "bbb")
+ */
+export function validateClientName(name: string): NameValidationResult {
+  if (!name || typeof name !== "string") {
+    return {
+      isValid: false,
+      cleanName: "",
+      errorMessage: "Por favor, informe seu nome completo.",
+    };
+  }
+
+  const trimmed = name.trim();
+
+  // Mínimo de 3 caracteres
+  if (trimmed.length < 3) {
+    return {
+      isValid: false,
+      cleanName: trimmed,
+      errorMessage: `Nome muito curto (${trimmed.length} caractere${trimmed.length === 1 ? "" : "s"}). Exigido no mínimo 3 caracteres.`,
+    };
+  }
+
+  // Permitir apenas letras e espaços (bloquear números e caracteres especiais)
+  const nameRegex = /^[A-Za-zÀ-ÖØ-öø-ÿ\s]+$/;
+  if (!nameRegex.test(trimmed)) {
+    return {
+      isValid: false,
+      cleanName: trimmed,
+      errorMessage: "O nome deve conter apenas letras e espaços (sem números ou caracteres especiais).",
+    };
+  }
+
+  // Bloquear repetições óbvias de letras idênticas (ex: "aaa", "bbb", "xxx")
+  const lettersOnly = trimmed.replace(/\s/g, "");
+  if (/^([A-Za-zÀ-ÖØ-öø-ÿ])\1+$/i.test(lettersOnly)) {
+    return {
+      isValid: false,
+      cleanName: trimmed,
+      errorMessage: "Por favor, informe um nome real (evite letras repetidas).",
+    };
+  }
+
+  return {
+    isValid: true,
+    cleanName: trimmed,
+  };
+}
+
+/**
+ * Proteção Anti-Bot e Rate Limiting no Cliente (Cooldown de Agendamento)
+ * Impede que scripts automatizados ou o mesmo navegador realizem múltiplos agendamentos em rajada
+ */
+export const BOOKING_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutos
+export const STORAGE_KEY_BOOKING_COOLDOWN = "junin_last_booking_timestamp";
+
+export function getBookingCooldownRemaining(): number {
+  try {
+    const lastStr = localStorage.getItem(STORAGE_KEY_BOOKING_COOLDOWN);
+    if (!lastStr) return 0;
+    const lastTimestamp = parseInt(lastStr, 10);
+    if (isNaN(lastTimestamp)) return 0;
+    const elapsed = Date.now() - lastTimestamp;
+    if (elapsed < BOOKING_COOLDOWN_MS) {
+      return Math.ceil((BOOKING_COOLDOWN_MS - elapsed) / 1000); // Segundos restantes
+    }
+  } catch {
+    // localStorage indisponível
+  }
+  return 0;
+}
+
+export function setBookingCooldown(): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_BOOKING_COOLDOWN, Date.now().toString());
+  } catch {
+    // ignore
+  }
+}
+
 export interface PhoneValidationResult {
   isValid: boolean;
   cleanDigits: string;
@@ -1142,11 +1250,11 @@ function isSequentialSequence(str: string): boolean {
 
 /**
  * Validação rigorosa de número de telefone/WhatsApp brasileiro:
- * 1. Mínimo e máximo de dígitos (10 para fixo ou 11 para celular)
+ * 1. Formato padrão com DDD e exatamente 10 ou 11 dígitos
  * 2. Bloqueio de sequências curtas (ex: números de 1 a 8, textos aleatórios)
  * 3. DDD válido no Brasil (Anatel)
- * 4. Dígito 9 inicial obrigatório para celulares de 11 dígitos
- * 5. Bloqueio de sequências repetidas (ex: 99999999, 11111111111, 00000000)
+ * 4. Dígito 9 inicial obrigatório para celulares de 11 dígitos (ex: (XX) 9XXXX-XXXX)
+ * 5. Bloqueio de sequências repetidas (ex: 99999999, 11111111111, 00000000, 99999-9999)
  * 6. Bloqueio de sequências contínuas de teste (ex: 12345678, 1 a 8, 98765432)
  */
 export function validateBrazilianPhone(phone: string): PhoneValidationResult {

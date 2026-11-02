@@ -286,23 +286,50 @@ export async function saveAppointmentToCloud(appointment: Appointment): Promise<
       return null;
     }
 
-    const payload = {
+    // Validação de integridade e Anti-Tampering de Preço
+    const numPrice = Number(appointment.price);
+    if (isNaN(numPrice) || numPrice <= 0) {
+      console.warn("Bloqueio de segurança: tentativa de salvar agendamento com valor zerado ou adulterado.");
+      return null;
+    }
+
+    // Validação estrita de Nome
+    if (!appointment.clientName || appointment.clientName.trim().length < 3) {
+      console.warn("Bloqueio de segurança: nome de cliente inválido (mínimo de 3 caracteres).");
+      return null;
+    }
+
+    const payload: Record<string, unknown> = {
       id: appointment.id,
       service_id: appointment.serviceId,
       barber_id: appointment.barberId,
       date: normDate,
       time: normTime,
-      client_name: appointment.clientName,
+      client_name: appointment.clientName.trim(),
       client_phone: appointment.clientPhone,
       status: appointment.status,
       notes: appointment.notes || "",
+      price: numPrice,
     };
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("appointments")
       .insert(payload)
       .select("id")
       .maybeSingle();
+
+    // Se o banco ainda não possuir a coluna 'price' antes da execução do script SQL, tenta sem a coluna
+    if (error && (error.code === "PGRST204" || error.message?.includes("price") || error.message?.includes("column"))) {
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.price;
+      const retry = await supabase
+        .from("appointments")
+        .insert(fallbackPayload)
+        .select("id")
+        .maybeSingle();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       console.warn("Could not insert appointment to Supabase table:", error.message);

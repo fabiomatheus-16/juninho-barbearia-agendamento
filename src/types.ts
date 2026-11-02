@@ -34,6 +34,7 @@ export type Appointment = {
   createdAt: string;
   notes?: string;
   tenantId?: string; // Multi-tenant support
+  price?: number; // Preço oficial validado e recalculado contra fraudes
 };
 
 export type ShopInfo = {

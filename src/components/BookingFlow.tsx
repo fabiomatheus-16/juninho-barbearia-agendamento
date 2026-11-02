@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
   ArrowLeft,
   Calendar,
@@ -17,6 +17,9 @@ import {
   CalendarPlus,
   Download,
   ExternalLink,
+  ShieldAlert,
+  ShieldCheck,
+  DollarSign,
 } from "lucide-react";
 import {
   actions,
@@ -39,6 +42,10 @@ import {
   useStore,
   formatBrazilianPhone,
   validateBrazilianPhone,
+  validateClientName,
+  getBookingCooldownRemaining,
+  setBookingCooldown,
+  BOOKING_COOLDOWN_MS,
 } from "../lib/store";
 import type { Appointment, Service, Barber } from "../types";
 import { BrandLogo } from "./ui/BrandLogo";
@@ -67,15 +74,38 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
   );
   const [selectedTime, setSelectedTime] = useState<string>("");
   const [clientName, setClientName] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
   const [clientPhone, setClientPhone] = useState("");
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [notes, setNotes] = useState("");
+
+  // Rate Limiting no Cliente (Proteção Anti-Bot / Anti-Spam com Cooldown)
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(() =>
+    getBookingCooldownRemaining()
+  );
+
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+    const interval = setInterval(() => {
+      const remaining = getBookingCooldownRemaining();
+      setCooldownSeconds(remaining);
+      if (remaining <= 0) {
+        clearInterval(interval);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [cooldownSeconds]);
 
   const [bookingSuccess, setBookingSuccess] = useState<Appointment | null>(null);
   const [bookingError, setBookingError] = useState<string | null>(null);
 
   const selectedService = services.find((s) => s.id === selectedServiceId);
   const selectedBarber = barbers.find((b) => b.id === selectedBarberId);
+
+  // Validação em tempo real do Nome do Cliente (Anti-Bot: letras apenas, min 3 chars)
+  const nameValidation = useMemo(() => {
+    return validateClientName(clientName);
+  }, [clientName]);
 
   // Validação em tempo real do número de telefone brasileiro
   const phoneValidation = useMemo(() => {
@@ -92,7 +122,7 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
   const canProceed = useMemo(() => {
     switch (step) {
       case 0:
-        return Boolean(selectedServiceId);
+        return Boolean(selectedServiceId && selectedService && selectedService.price > 0);
       case 1:
         return Boolean(selectedBarberId);
       case 2:
@@ -105,8 +135,11 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
         );
       case 3:
         return Boolean(
-          clientName.trim().length >= 2 &&
-          phoneValidation.isValid
+          nameValidation.isValid &&
+          phoneValidation.isValid &&
+          selectedService &&
+          selectedService.price > 0 &&
+          cooldownSeconds === 0
         );
       default:
         return false;
@@ -114,17 +147,25 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
   }, [
     step,
     selectedServiceId,
+    selectedService,
     selectedBarberId,
     selectedDate,
     selectedTime,
-    clientName,
+    nameValidation.isValid,
     phoneValidation.isValid,
+    cooldownSeconds,
     taken,
   ]);
 
   const handleNext = () => {
     setBookingError(null);
     if (step < 3) {
+      if (step === 0) {
+        if (!selectedService || selectedService.price <= 0) {
+          setBookingError("O serviço selecionado possui valor inválido ou zerado. Por segurança, selecione um serviço com valor maior que zero.");
+          return;
+        }
+      }
       if (step === 2) {
         if (!selectedTime) {
           setBookingError("Por favor, selecione um horário para prosseguir.");
@@ -143,7 +184,25 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
       return;
     }
 
-    // Validação estrita do telefone no passo final
+    // 1. Proteção Anti-Bot / Rate Limiting (Cooldown do navegador)
+    if (cooldownSeconds > 0) {
+      setBookingError(
+        `Proteção Anti-Spam ativa: Aguarde ${cooldownSeconds}s para realizar outro agendamento neste navegador.`
+      );
+      return;
+    }
+
+    // 2. Validação estrita do Nome no passo final
+    if (!nameValidation.isValid) {
+      setNameTouched(true);
+      setBookingError(
+        nameValidation.errorMessage ||
+        "Por favor, insira seu nome completo (mínimo de 3 caracteres, apenas letras)."
+      );
+      return;
+    }
+
+    // 3. Validação estrita do telefone no passo final
     if (!phoneValidation.isValid) {
       setPhoneTouched(true);
       setBookingError(
@@ -153,8 +212,16 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
       return;
     }
 
+    // 4. Anti-Tampering de Preço: Verificação de valor no catálogo oficial
+    if (!selectedService || selectedService.price <= 0) {
+      setBookingError(
+        "Tentativa de agendamento com valor zerado ou adulterado bloqueada. O valor deve ser maior que R$ 0,00."
+      );
+      return;
+    }
+
     // Submit booking
-    if (!selectedService || !selectedBarber || !selectedTime) return;
+    if (!selectedBarber || !selectedTime) return;
 
     if (!isOpenDate(selectedDate)) {
       setBookingError("A barbearia não abre aos domingos. Selecione outro dia.");
@@ -180,6 +247,11 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
       return;
     }
 
+    if (taken.has(selectedTime)) {
+      setBookingError("Este horário acabou de ser reservado. Por favor, escolha outro horário.");
+      return;
+    }
+
     try {
       const appt = actions.addAppointment({
         serviceId: selectedService.id,
@@ -190,6 +262,11 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
         clientPhone: clientPhone.trim(),
         notes: notes.trim(),
       });
+
+      // Ativar cooldown anti-spam no navegador do cliente
+      setBookingCooldown();
+      setCooldownSeconds(Math.ceil(BOOKING_COOLDOWN_MS / 1000));
+
       setBookingSuccess(appt);
     } catch (err) {
       setBookingError(
@@ -222,6 +299,13 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
     const svc = services.find((s) => s.id === appt.serviceId);
     const bar = barbers.find((b) => b.id === appt.barberId);
     return `Olá, ${SHOP.name}! Acabei de solicitar um agendamento:\n\n✂️ *${svc?.name}* (${brl(svc?.price || 0)})\n💈 *Profissional:* ${bar?.name}\n📅 *Data:* ${formatDateBR(appt.date)} às ${appt.time}\n👤 *Cliente:* ${appt.clientName} (${appt.clientPhone})\n\nPor favor, confirmem meu horário!`;
+  };
+
+  // Formatter & Sanitizer for Name Input (Only letters and spaces)
+  const handleNameChange = (val: string) => {
+    const sanitized = val.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ\s]/g, "");
+    setClientName(sanitized);
+    if (bookingError) setBookingError(null);
   };
 
   // Formatter for Phone Input
@@ -877,12 +961,28 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
             </p>
           </div>
 
-          {/* Quick Recap */}
-          <div className="p-3.5 rounded-xl bg-[#161820] border border-[#272a34] text-xs text-gray-300 space-y-1">
-            <p>
-              ✂️ <strong>Serviço:</strong> {selectedService?.name} (
-              {brl(selectedService?.price || 0)})
-            </p>
+          {/* Banner de Cooldown / Anti-Spam ativo */}
+          {cooldownSeconds > 0 && (
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2.5 animate-in fade-in">
+              <ShieldAlert className="size-5 shrink-0 text-amber-400 animate-pulse" />
+              <div>
+                <span className="font-bold block">Proteção Anti-Spam Ativa</span>
+                <span className="text-gray-300 text-[11px]">
+                  Aguarde <strong>{Math.floor(cooldownSeconds / 60)}m {cooldownSeconds % 60}s</strong> para realizar um novo agendamento neste dispositivo.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Recap com Anti-Tampering do Valor Oficial */}
+          <div className="p-3.5 rounded-xl bg-[#161820] border border-[#272a34] text-xs text-gray-300 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span>✂️ <strong>Serviço:</strong> {selectedService?.name}</span>
+              <span className="font-display font-bold text-sm text-[#00f0ff] flex items-center gap-1">
+                <ShieldCheck className="size-3.5 text-emerald-400" />
+                {brl(selectedService?.price || 0)}
+              </span>
+            </div>
             <p>
               💈 <strong>Barbeiro:</strong> {selectedBarber?.name}
             </p>
@@ -890,30 +990,69 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
               📅 <strong>Quando:</strong> {formatDateBR(selectedDate)} às{" "}
               {selectedTime}
             </p>
+            <div className="pt-1 text-[10px] text-emerald-400/90 flex items-center gap-1 font-mono">
+              <Check className="size-3" /> Valor oficial verificado no catálogo (sem adulteração)
+            </div>
           </div>
 
           <div className="space-y-3.5">
+            {/* Campo de Nome com Validação Rigorosa (Apenas letras, min 3) */}
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
-                Seu Nome Completo *
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Seu Nome Completo *
+                </label>
+                {clientName && nameValidation.isValid && (
+                  <span className="text-[11px] text-emerald-400 flex items-center gap-1 font-medium animate-in fade-in">
+                    <CheckCircle2 className="size-3 text-emerald-400" />
+                    Nome Válido
+                  </span>
+                )}
+              </div>
               <div className="relative">
-                <User className="size-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <User
+                  className={`size-4 absolute left-3.5 top-1/2 -translate-y-1/2 transition ${
+                    nameTouched && !nameValidation.isValid
+                      ? "text-red-400"
+                      : clientName && nameValidation.isValid
+                      ? "text-emerald-400"
+                      : "text-gray-400"
+                  }`}
+                />
                 <input
                   type="text"
                   required
                   placeholder="Ex: João da Silva"
                   value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  className="w-full h-12 rounded-xl bg-[#161820] border border-[#272a34] pl-10 pr-4 text-white text-sm focus:outline-none focus:border-[#00f0ff]"
+                  onChange={(e) => handleNameChange(e.target.value)}
+                  onBlur={() => setNameTouched(true)}
+                  className={`w-full h-12 rounded-xl pl-10 pr-10 text-white text-sm focus:outline-none transition ${
+                    nameTouched && !nameValidation.isValid
+                      ? "bg-red-500/10 border border-red-500/50 focus:border-red-400 focus:ring-1 focus:ring-red-400/50"
+                      : clientName && nameValidation.isValid
+                      ? "bg-emerald-500/5 border border-emerald-500/40 focus:border-emerald-400"
+                      : "bg-[#161820] border border-[#272a34] focus:border-[#00f0ff]"
+                  }`}
                 />
+                {clientName && nameValidation.isValid && (
+                  <CheckCircle2 className="size-4 text-emerald-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                )}
               </div>
+
+              {/* Erro de Nome */}
+              {nameTouched && !nameValidation.isValid && (
+                <div className="mt-1.5 flex items-start gap-1.5 text-xs text-red-400 animate-in fade-in">
+                  <AlertCircle className="size-3.5 shrink-0 mt-0.5 text-red-400" />
+                  <span>{nameValidation.errorMessage}</span>
+                </div>
+              )}
             </div>
 
+            {/* Campo de Telefone com Validação Estrita */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
-                  Seu WhatsApp com DDD *
+                  Seu Celular / WhatsApp com DDD *
                 </label>
                 {clientPhone && phoneValidation.isValid && (
                   <span className="text-[11px] text-emerald-400 flex items-center gap-1 font-medium animate-in fade-in">
@@ -952,7 +1091,7 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
                 )}
               </div>
 
-              {/* Mensagem de Erro Visual Explícita */}
+              {/* Mensagem de Erro Visual Explícita de Telefone */}
               {phoneTouched && !phoneValidation.isValid && (
                 <div className="mt-1.5 flex items-start gap-1.5 text-xs text-red-400 animate-in fade-in">
                   <AlertCircle className="size-3.5 shrink-0 mt-0.5 text-red-400" />
@@ -963,7 +1102,7 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
               {/* Dica de formato */}
               {(!phoneTouched || phoneValidation.isValid) && (
                 <p className="mt-1 text-[11px] text-gray-500">
-                  Formato: (DD) 9XXXX-XXXX para celular ou (DD) XXXX-XXXX para fixo.
+                  Exigido celular brasileiro no padrão (XX) 9XXXX-XXXX com DDD.
                 </p>
               )}
             </div>
@@ -992,10 +1131,17 @@ export function BookingFlow({ onBackToHome }: BookingFlowProps) {
           className="w-full h-13 rounded-2xl bg-gradient-to-r from-[#00f0ff] to-[#0099ff] text-[#090a0f] font-bold text-sm shadow-[0_0_25px_rgba(0,240,255,0.4)] hover:brightness-110 transition active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2"
         >
           {step === 3 ? (
-            <>
-              <Check className="size-4 stroke-[3]" />
-              Confirmar Agendamento
-            </>
+            cooldownSeconds > 0 ? (
+              <>
+                <ShieldAlert className="size-4 text-amber-400" />
+                <span>Aguarde ({cooldownSeconds}s)</span>
+              </>
+            ) : (
+              <>
+                <Check className="size-4 stroke-[3]" />
+                Confirmar Agendamento ({brl(selectedService?.price || 0)})
+              </>
+            )
           ) : (
             <>
               <span>Avançar</span>
